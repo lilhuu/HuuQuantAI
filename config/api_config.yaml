@@ -1,0 +1,40 @@
+app:
+  title: "HUU Crypto Quant API"
+  version: "0.2.0"
+  description: "Crypto-only quantitative trading API with Binance public data and local paper trading."
+  docs_url: "/docs"
+  redoc_url: "/redoc"
+  openapi_url: "/openapi.json"
+
+server:
+  host: "127.0.0.1"
+  port: 8000
+  reload: false
+
+cors:
+  allow_origins:
+    - "http://127.0.0.1:5173"
+    - "http://localhost:5173"
+    - "http://127.0.0.1:4173"
+    - "http://localhost:4173"
+    - "http://127.0.0.1:8000"
+    - "http://localhost:8000"
+  allow_credentials: true
+  allow_methods:
+    - "*"
+  allow_headers:
+    - "*"
+
+trading:
+  config_path: "config/config.yaml"
+  auto_start: false
+  stop_on_shutdown: true
+
+auth:
+  storage_path: "data/app_state.db"
+  session_hours: 168
+
+websocket:
+  auth_timeout_seconds: 5
+  orders_interval_seconds: 1.0
+  system_interval_seconds: 1.0

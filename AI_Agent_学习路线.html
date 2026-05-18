@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>AI Agent 系统性学习路线</title>
+<style>
+  @page { size: A4; margin: 2cm 2.2cm; }
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+    font-size: 14px; line-height: 1.8; color: #1a1a1a;
+    max-width: 800px; margin: 0 auto; padding: 30px 20px;
+  }
+  h1 { font-size: 26px; text-align: center; margin: 10px 0 4px; color: #1a1a1a; }
+  .subtitle { text-align: center; color: #666; font-size: 13px; margin-bottom: 30px; }
+  h2 {
+    font-size: 19px; margin: 36px 0 14px; padding-bottom: 6px;
+    border-bottom: 2px solid #2563eb; color: #1e3a5f;
+  }
+  h3 { font-size: 16px; margin: 24px 0 10px; color: #2563eb; }
+  h4 { font-size: 14px; margin: 18px 0 8px; color: #333; }
+  p { margin: 6px 0; }
+  blockquote {
+    margin: 10px 0; padding: 6px 16px; border-left: 3px solid #93c5fd;
+    background: #eff6ff; color: #555; font-size: 13px;
+  }
+  strong { color: #1e3a5f; }
+  code {
+    background: #f1f5f9; padding: 1px 5px; border-radius: 3px;
+    font-family: "Cascadia Code", "Consolas", monospace; font-size: 12px;
+  }
+  pre {
+    background: #1e293b; color: #e2e8f0; padding: 14px 18px; border-radius: 6px;
+    overflow-x: auto; font-size: 12px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; }
+  ul, ol { margin: 6px 0; padding-left: 22px; }
+  li { margin: 3px 0; }
+  hr { border: none; border-top: 1px solid #e2e8f0; margin: 28px 0; }
+  table {
+    width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px;
+  }
+  th {
+    background: #2563eb; color: white; padding: 8px 10px;
+    text-align: left; font-weight: 600;
+  }
+  td { padding: 7px 10px; border-bottom: 1px solid #e2e8f0; }
+  tr:nth-child(even) td { background: #f8fafc; }
+  .overview {
+    background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px;
+    padding: 16px 22px; margin: 16px 0; font-family: "Cascadia Code","Consolas",monospace;
+    font-size: 13px; line-height: 1.7; white-space: pre;
+  }
+  .week-plan {
+    background: #fefce8; border: 1px solid #fde68a; border-radius: 8px;
+    padding: 14px 20px; margin: 12px 0; font-family: "Cascadia Code","Consolas",monospace;
+    font-size: 13px; line-height: 1.7; white-space: pre;
+  }
+  .highlight { background: #fef3c7; padding: 2px 6px; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<h1>AI Agent 系统性学习路线</h1>
+<p class="subtitle">目标：从零基础到能够独立设计、开发和部署 AI Agent 系统。<br>预计周期：3-6 个月（每天 1-2 小时投入）。</p>
+
+<hr>
+
+<h2>一、路线总览</h2>
+
+<div class="overview">Phase 1 ─── 基础储备（2-4 周）
+  ├─ Python 编程基础
+  ├─ LLM 原理与 API 使用
+  └─ 提示词工程
+
+Phase 2 ─── Agent 核心概念（2-3 周）
+  ├─ Agent 架构与类型
+  ├─ 工具调用（Function Calling）
+  ├─ 记忆系统
+  └─ 规划与推理
+
+Phase 3 ─── 框架实战（3-5 周）
+  ├─ 主流框架上手
+  ├─ 单 Agent 系统构建
+  ├─ 多 Agent 协作
+  └─ MCP 协议
+
+Phase 4 ─── 进阶与生产化（3-4 周）
+  ├─ RAG + Agent
+  ├─ 可观测性与调试
+  ├─ 安全与对齐
+  └─ 部署方案
+
+Phase 5 ─── 项目实战（持续）
+  ├─ 从简单到复杂逐步迭代
+  └─ 开源贡献</div>
+
+<hr>
+
+<h2>二、Phase 1：基础储备（第 1-4 周）</h2>
+
+<h3>2.1 Python 编程基础</h3>
+
+<blockquote>时间：1-2 周 | 目标：能熟练编写脚本、处理数据、调用 API</blockquote>
+
+<table>
+<tr><th>知识点</th><th>说明</th><th>推荐资源</th></tr>
+<tr><td>Python 语法基础</td><td>变量、控制流、函数、类</td><td>Python 官方教程</td></tr>
+<tr><td>异步编程</td><td><code>async/await</code>、<code>asyncio</code> 事件循环</td><td>Real Python: Async IO</td></tr>
+<tr><td>HTTP 请求</td><td><code>requests</code>、<code>httpx</code>、<code>aiohttp</code></td><td>官方文档 + 实战</td></tr>
+<tr><td>数据处理</td><td><code>json</code>、<code>pandas</code> 基础</td><td>官方文档</td></tr>
+<tr><td>包管理</td><td><code>pip</code>、<code>venv</code>、<code>poetry</code></td><td>官方文档</td></tr>
+<tr><td>版本控制</td><td>Git 基础操作</td><td>Pro Git 书籍</td></tr>
+</table>
+
+<p><strong>检验项目</strong>：写一个异步爬虫，并发获取 10 个 API 的数据并合并保存。</p>
+
+<h3>2.2 大语言模型（LLM）原理与 API</h3>
+
+<blockquote>时间：1 周 | 目标：理解 LLM 的基本原理，能熟练调用主流 API</blockquote>
+
+<p><strong>理论知识</strong>：</p>
+<ul>
+  <li>Transformer 架构概览（注意力机制、编码器-解码器）</li>
+  <li>预训练 → 微调 → 对齐（RLHF/DPO）的基本流程</li>
+  <li>Tokenization、上下文窗口、温度等关键概念</li>
+  <li>模型间的差异：GPT、Claude、Gemini、开源模型</li>
+</ul>
+
+<p><strong>实践技能</strong>：</p>
+<ul>
+  <li>调用 OpenAI / Anthropic API：文本生成、流式输出</li>
+  <li>理解 system prompt、user message、assistant message 的角色</li>
+  <li>掌握常用参数：<code>temperature</code>、<code>max_tokens</code>、<code>top_p</code>、<code>stop</code></li>
+</ul>
+
+<p><strong>检验项目</strong>：通过 API 用 Chain of Thought 提示词解决一个数学推理问题。</p>
+
+<h3>2.3 提示词工程（Prompt Engineering）</h3>
+
+<blockquote>时间：1 周 | 目标：掌握结构化提示词编写技巧，能系统性地调试 Prompt</blockquote>
+
+<p><strong>核心技法</strong>：</p>
+<ul>
+  <li>角色设定（System Prompt）</li>
+  <li>少样本学习（Few-shot）</li>
+  <li>思维链（Chain-of-Thought, CoT）</li>
+  <li>思维树（Tree-of-Thought, ToT）</li>
+  <li>分解任务（Task Decomposition）</li>
+  <li>格式约束（JSON Output、Markdown）</li>
+</ul>
+
+<p><strong>推荐阅读</strong>：OpenAI Prompt Engineering Guide、Anthropic Prompt Engineering Guide</p>
+
+<p><strong>检验项目</strong>：用提示词让模型从非结构化文本中提取结构化数据（JSON），覆盖各种边界情况。</p>
+
+<hr>
+
+<h2>三、Phase 2：Agent 核心概念（第 5-7 周）</h2>
+
+<h3>3.1 理解 AI Agent</h3>
+
+<blockquote>时间：3-5 天</blockquote>
+
+<p><strong>什么是 AI Agent？</strong> 一个 AI Agent 是一个能自主感知环境、制定计划、使用工具并执行行动来完成目标的系统。不同于单纯的 LLM 问答，Agent 具有自主性、工具使用、记忆、规划和反思能力。</p>
+
+<p><strong>经典架构</strong>（以 Anthropic 的定义为例）：</p>
+
+<div class="overview">用户输入 → 规划（思考需要做什么）
+            ↓
+         工具调用（执行具体操作）
+            ↓
+         观察结果（工具返回的信息）
+            ↓
+         推理与调整（判断是否需要下一步）
+            ↓
+         最终输出（向用户返回结果）</div>
+
+<p><strong>Agent 类型对比</strong>：</p>
+<table>
+<tr><th>类型</th><th>描述</th><th>适用场景</th></tr>
+<tr><td>ReAct Agent</td><td>思考-行动-观察循环</td><td>通用任务</td></tr>
+<tr><td>Plan-and-Execute Agent</td><td>先规划再逐步执行</td><td>复杂多步骤任务</td></tr>
+<tr><td>Reflection Agent</td><td>执行后自我反思改进</td><td>写作、代码生成</td></tr>
+<tr><td>Multi-Agent</td><td>多个 Agent 协作</td><td>复杂工作流</td></tr>
+</table>
+
+<h3>3.2 工具调用（Function Calling / Tool Use）</h3>
+
+<blockquote>时间：1 周</blockquote>
+
+<p><strong>核心概念</strong>：Tool 的定义（名称、描述、参数 Schema）、LLM 如何决定调用哪个工具、工具执行结果如何反馈给 LLM 进行下一步推理、并行工具调用。</p>
+
+<p><strong>实战技能</strong>：定义搜索、计算、文件读写等工具；实现工具的自动注册和分发；处理工具调用失败和重试逻辑。</p>
+
+<pre><code># 伪代码示例：工具定义
+tools = [
+    {
+        "name": "search_web",
+        "description": "搜索网络获取最新信息",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "搜索关键词"}
+            },
+            "required": ["query"]
+        }
+    }
+]</code></pre>
+
+<p><strong>检验项目</strong>：构建一个能搜索网络、读取网页内容并总结的 Agent。</p>
+
+<h3>3.3 记忆系统（Memory）</h3>
+
+<blockquote>时间：3-5 天</blockquote>
+
+<p>Agent 的记忆分为多个层次：</p>
+<table>
+<tr><th>记忆类型</th><th>存储内容</th><th>实现方式</th><th>生命周期</th></tr>
+<tr><td>短期记忆</td><td>当前对话上下文</td><td>LLM 上下文窗口</td><td>一次对话</td></tr>
+<tr><td>长期记忆</td><td>用户偏好、历史事实</td><td>向量数据库 / 文件</td><td>跨对话</td></tr>
+<tr><td>工作记忆</td><td>当前任务进度</td><td>临时变量 / 文件</td><td>任务期间</td></tr>
+</table>
+
+<p><strong>关键实现</strong>：对话历史管理（滑动窗口、摘要压缩）；向量数据库检索（ChromaDB、Pinecone、Milvus）；关键信息提取与结构化存储；记忆的优先级与遗忘机制。</p>
+
+<p><strong>检验项目</strong>：给 Agent 添加长期记忆，使其能记住用户的偏好并在后续对话中使用。</p>
+
+<h3>3.4 规划与推理（Planning & Reasoning）</h3>
+
+<blockquote>时间：5-7 天</blockquote>
+
+<p><strong>关键技术</strong>：ReAct（交替推理与行动）、Plan-and-Solve（先规划再执行）、Self-Reflection（执行后评估修正）、Repeated Reflection（多次反思改进）。</p>
+
+<p><strong>实现方式</strong>：利用 LLM 的 Chain-of-Thought 能力；显式的规划步骤；子任务分解与依赖管理；循环执行直到任务完成或达到最大轮次。</p>
+
+<p><strong>检验项目</strong>：构建一个能自动研究一个话题的 Agent（搜索 → 阅读 → 总结 → 生成报告）。</p>
+
+<hr>
+
+<h2>四、Phase 3：框架实战（第 8-11 周）</h2>
+
+<h3>4.1 主流框架概览与选择</h3>
+
+<table>
+<tr><th>框架</th><th>语言</th><th>特点</th><th>适合场景</th></tr>
+<tr><td><strong>LangChain / LangGraph</strong></td><td>Python/JS</td><td>生态最丰富、灵活度高</td><td>通用 Agent 开发</td></tr>
+<tr><td><strong>AutoGen (Microsoft)</strong></td><td>Python</td><td>多 Agent 对话</td><td>多 Agent 协作</td></tr>
+<tr><td><strong>CrewAI</strong></td><td>Python</td><td>简洁易用、角色化</td><td>快速原型</td></tr>
+<tr><td><strong>Semantic Kernel</strong></td><td>C#/Python</td><td>企业级、Azure 集成</td><td>.NET 生态</td></tr>
+<tr><td><strong>Anthropic SDK</strong></td><td>Python/JS</td><td>原生 MCP 支持、简洁</td><td>Claude 专用</td></tr>
+<tr><td><strong>OpenAI SDK</strong></td><td>Python/JS</td><td>原生 Function Calling</td><td>GPT 专用</td></tr>
+<tr><td><strong>Smolagents (HuggingFace)</strong></td><td>Python</td><td>轻量级、代码优先</td><td>实验与教学</td></tr>
+<tr><td><strong>Agno</strong></td><td>Python</td><td>极简设计、生产级</td><td>轻量 Agent</td></tr>
+</table>
+
+<p><strong>推荐学习路径</strong>：先从 <strong>LangChain / LangGraph</strong> 入手（生态最丰富），再根据项目需要学习其他框架。</p>
+
+<h3>4.2 LangChain 入门</h3>
+
+<blockquote>时间：1 周</blockquote>
+
+<p><strong>学习步骤</strong>：理解 LangChain 核心概念（Model I/O、Retrieval、Chain、Agent、Tool）→ 掌握 ChatModel 的调用 → 学习 Prompt Template 管理 → 构建简单的 Chain → 集成 Tool 和 Agent Executor。</p>
+
+<p><strong>关键知识点</strong>：<code>ChatOpenAI</code> / <code>ChatAnthropic</code>、<code>PromptTemplate</code> / <code>ChatPromptTemplate</code>、<code>StrOutputParser</code> / <code>PydanticOutputParser</code>、<code>Tool</code> 的定义与注册、<code>AgentExecutor</code> 的运行机制。</p>
+
+<p><strong>检验项目</strong>：用 LangChain 构建一个具备搜索和计算功能的客服 Agent。</p>
+
+<h3>4.3 LangGraph：状态化 Agent</h3>
+
+<blockquote>时间：1-2 周</blockquote>
+
+<p>LangGraph 是 LangChain 的进阶框架，支持有状态、循环的工作流，是实现复杂 Agent 的核心工具。</p>
+
+<p><strong>学习要点</strong>：StateGraph（定义状态和图结构）、Node（每个处理步骤）、Edge（步骤之间的跳转逻辑）、Conditional Edge（条件分支）、循环与终止条件。</p>
+
+<pre><code># 伪代码：LangGraph 的基本结构
+graph = StateGraph(AgentState)
+graph.add_node("agent", call_agent)
+graph.add_node("tools", call_tools)
+graph.add_edge("agent", "tools")
+graph.add_conditional_edges("tools", should_continue)
+graph.set_entry_point("agent")
+app = graph.compile()</code></pre>
+
+<p><strong>检验项目</strong>：用 LangGraph 构建一个 ReAct Agent，支持多轮工具调用和错误恢复。</p>
+
+<h3>4.4 多 Agent 系统</h3>
+
+<blockquote>时间：1 周</blockquote>
+
+<p><strong>架构模式</strong>：Supervisor Agent（一个主 Agent 协调多个子 Agent）、Debate / Discussion（多个 Agent 讨论协作）、Pipeline（Agent 链式传递结果）、Hierarchical（层级化管理）。</p>
+
+<p><strong>实现方式</strong>：LangGraph 的 <code>Send</code> API 实现并行 Agent、AutoGen 的对话式多 Agent、CrewAI 的角色化多 Agent。</p>
+
+<p><strong>检验项目</strong>：构建一个 Supervisor + 两个 Specialist 的多 Agent 系统（研究 Agent + 写作 Agent，由 Supervisor 协调）。</p>
+
+<h3>4.5 MCP 协议（Model Context Protocol）</h3>
+
+<blockquote>时间：3-5 天</blockquote>
+
+<p>MCP 是 Anthropic 推出的开放协议，用于标准化 LLM 与外部工具/数据源的连接方式。</p>
+
+<p><strong>核心概念</strong>：MCP Server（提供工具和资源）、MCP Client（连接 Server 并使用工具）、标准化接口（无需为每个工具写适配代码）、资源 Resources（文件、数据库）、工具 Tools（可调用的功能）。</p>
+
+<p><strong>学习内容</strong>：搭建 MCP Server；使用现成的 MCP Server（文件系统、数据库、Slack、GitHub 等）；理解 MCP 与传统 Function Calling 的区别。</p>
+
+<p><strong>检验项目</strong>：创建一个本地的 MCP Server，提供天气查询或文件读写功能，然后用 Agent 连接使用。</p>
+
+<hr>
+
+<h2>五、Phase 4：进阶与生产化（第 12-15 周）</h2>
+
+<h3>5.1 RAG + Agent</h3>
+
+<blockquote>时间：1 周</blockquote>
+
+<p>RAG（检索增强生成）让 Agent 能访问私有知识库。</p>
+
+<p><strong>学习要点</strong>：文档分块（Chunking）策略、Embedding 模型选择、向量数据库（ChromaDB、Pgvector、Pinecone）、检索策略（相似度搜索、MMR、HyDE）、将 RAG 作为 Agent 的工具。</p>
+
+<p><strong>典型架构</strong>：文档 → 分块 → Embedding → 向量数据库 → 用户问题 → Agent → 检索工具 → 向量检索 → 上下文 → LLM → 回答</p>
+
+<p><strong>检验项目</strong>：给 Agent 添加一个"查询企业内部文档"的 RAG 工具。</p>
+
+<h3>5.2 可观测性与调试</h3>
+
+<blockquote>时间：3-5 天</blockquote>
+
+<p><strong>关键工具</strong>：LangSmith（Trace、Debug、评估）、LangFuse（开源可观测性平台）、Weights & Biases Prompts（Prompt 管理与追踪）、自建的日志系统。</p>
+
+<p><strong>监控指标</strong>：每次 LLM 调用的延迟和 Token 消耗、工具调用成功率、Agent 完成任务的轮次数量、最终结果质量评估。</p>
+
+<h3>5.3 安全与对齐</h3>
+
+<blockquote>时间：3-5 天</blockquote>
+
+<p><strong>核心安全问题</strong>：提示注入（Prompt Injection）、工具越权、数据泄露、无限循环。</p>
+
+<p><strong>防护措施</strong>：输入验证与净化、工具权限最小化、人工审核（Human-in-the-Loop）、最大轮次限制和超时、敏感内容过滤、独立的 Guardrails 层（如 Nvidia NeMo Guardrails）。</p>
+
+<h3>5.4 部署方案</h3>
+
+<blockquote>时间：1 周</blockquote>
+
+<table>
+<tr><th>部署方式</th><th>适用场景</th><th>推荐工具</th></tr>
+<tr><td>API 服务</td><td>提供 Agent API</td><td>FastAPI + Uvicorn</td></tr>
+<tr><td>流式响应</td><td>实时对话</td><td>WebSocket / SSE</td></tr>
+<tr><td>任务队列</td><td>后台长任务</td><td>Celery / Redis Queue</td></tr>
+<tr><td>容器化</td><td>标准化部署</td><td>Docker + Docker Compose</td></tr>
+<tr><td>无服务器</td><td>弹性扩缩</td><td>AWS Lambda / Vercel</td></tr>
+</table>
+
+<p><strong>生产注意事项</strong>：请求限流、并发控制、错误重试与退避策略、监控告警、版本管理与回滚。</p>
+
+<hr>
+
+<h2>六、Phase 5：项目实战</h2>
+
+<p>从简单到复杂，逐步构建实际项目。</p>
+
+<h3>项目 1：个人助手 Agent（1 周）</h3>
+
+<p><strong>功能</strong>：联网搜索并总结、读取本地文件并回答、天气查询、日历管理。</p>
+<p><strong>技术栈</strong>：单一 Agent + 3-5 个工具 + 短期记忆</p>
+
+<h3>项目 2：自动化研究报告 Agent（1-2 周）</h3>
+
+<p><strong>功能</strong>：接受一个主题、自动搜索多个来源、阅读并提取关键信息、生成结构化报告（Markdown/PDF）。</p>
+<p><strong>技术栈</strong>：Plan-and-Execute Agent + 搜索/网页读取工具 + 文件输出</p>
+
+<h3>项目 3：客服工单处理系统（2 周）</h3>
+
+<p><strong>功能</strong>：接收用户问题、检索知识库（RAG）、自动回复常见问题、复杂问题转人工。</p>
+<p><strong>技术栈</strong>：ReAct Agent + RAG + Human-in-the-Loop</p>
+
+<h3>项目 4：多 Agent 编程助手（2-3 周）</h3>
+
+<p><strong>功能</strong>：架构 Agent（分析需求、设计方案）、编码 Agent（编写代码）、测试 Agent（编写和运行测试）、审核 Agent（Code Review）。</p>
+<p><strong>技术栈</strong>：LangGraph Multi-Agent + 文件系统/Shell 工具</p>
+
+<hr>
+
+<h2>七、推荐学习资源</h2>
+
+<h3>课程与教程</h3>
+<table>
+<tr><th>资源</th><th>链接</th><th>说明</th></tr>
+<tr><td>DeepLearning.AI - Building Systems with AI Agents</td><td>官网</td><td>入门首选，免费</td></tr>
+<tr><td>DeepLearning.AI - LangChain for LLM Apps</td><td>官网</td><td>LangChain 入门</td></tr>
+<tr><td>DeepLearning.AI - Multi AI Agent Systems (CrewAI)</td><td>官网</td><td>多 Agent 实践</td></tr>
+<tr><td>Anthropic - Build with Claude</td><td>docs.anthropic.com</td><td>Claude Agent 开发</td></tr>
+<tr><td>OpenAI - Function Calling 官方文档</td><td>platform.openai.com</td><td>基础概念</td></tr>
+<tr><td>LangChain 官方教程</td><td>python.langchain.com</td><td>文档完善</td></tr>
+</table>
+
+<h3>必读论文</h3>
+<table>
+<tr><th>论文</th><th>核心贡献</th></tr>
+<tr><td><strong>ReAct: Synergizing Reasoning and Acting in LLMs</strong></td><td>Agent 的基础范式</td></tr>
+<tr><td><strong>Chain-of-Thought Prompting Elicits Reasoning in LLMs</strong></td><td>推理增强</td></tr>
+<tr><td><strong>Tree of Thoughts: Deliberate Problem Solving</strong></td><td>高级推理</td></tr>
+<tr><td><strong>Toolformer: Language Models Can Teach Themselves to Use Tools</strong></td><td>工具学习的理论</td></tr>
+<tr><td><strong>Reflexion: Language Agents with Verbal Reinforcement Learning</strong></td><td>自我反思</td></tr>
+</table>
+
+<h3>开源项目参考</h3>
+<table>
+<tr><th>项目</th><th>GitHub</th><th>学习价值</th></tr>
+<tr><td>LangChain</td><td>langchain-ai/langchain</td><td>生态最全</td></tr>
+<tr><td>AutoGen</td><td>microsoft/autogen</td><td>多 Agent 对话</td></tr>
+<tr><td>CrewAI</td><td>crewAIInc/crewAI</td><td>简洁的多 Agent</td></tr>
+<tr><td>smolagents</td><td>huggingface/smolagents</td><td>轻量级教学</td></tr>
+<tr><td>open-interpreter</td><td>open-interpreter/open-interpreter</td><td>生产级 Agent</td></tr>
+</table>
+
+<hr>
+
+<h2>八、快速起步路线（1 个月速成版）</h2>
+
+<p>如果您时间有限，想尽快上手做出可用项目：</p>
+
+<div class="week-plan">第 1 周：Python 异步 + LLM API 调用 + 提示词工程
+第 2 周：Function Calling + ReAct 循环 + 简单工具
+第 3 周：LangChain/LangGraph 上手 + 记忆系统
+第 4 周：构建一个完整的单 Agent 项目（搜索 + 阅读 + 总结）</div>
+
+<p>之后边做项目边补充进阶知识。</p>
+
+<hr>
+
+<h2>九、常见误区与建议</h2>
+
+<ul>
+  <li><strong>不要过早陷入框架细节</strong>：先理解 Agent 的核心循环（思考→行动→观察），再学框架</li>
+  <li><strong>重视提示词工程</strong>：即使使用框架，好的提示词仍是 Agent 表现的关键</li>
+  <li><strong>先做单 Agent，再做多 Agent</strong>：多 Agent 的复杂度翻倍，先打好基础</li>
+  <li><strong>关注 Token 成本</strong>：Agent 循环会消耗大量 Token，设计时要注意效率</li>
+  <li><strong>注重可观测性</strong>：Agent 的调试远比传统程序困难，日志和追踪是必须的</li>
+  <li><strong>从小处着手</strong>：用最简单的 Python 脚本实现 ReAct 循环，比直接上框架更能加深理解</li>
+</ul>
+
+<hr>
+
+<blockquote><strong>记住</strong>：AI Agent 领域发展极快，框架和最佳实践在持续更新。保持学习、关注官方文档和社区动态，比死记硬背某个框架更重要。</blockquote>
+
+</body>
+</html>

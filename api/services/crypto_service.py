@@ -1,0 +1,541 @@
+"""Crypto market data and paper-trading service."""
+
+from __future__ import annotations
+
+from dataclasses import asdict
+import os
+import time
+from typing import Any, Optional
+
+from api.error_codes import ApiError, ErrorCode
+from api.models.request import (
+    BinanceTestnetCredentialsRequest,
+    BinanceTestnetEnableRequest,
+    BinanceTestnetOrderRequest,
+    CryptoPaperOrderRequest,
+    CryptoShadowOrderRequest,
+    CryptoStrategyBacktestRequest,
+    CryptoStrategyRunRequest,
+    CryptoStrategyWalkForwardRequest,
+)
+from api.models.response import (
+    BinanceTestnetActionResponse,
+    BinanceTestnetOrderResponse,
+    BinanceTestnetStatusResponse,
+    ConnectionHealthResponse,
+    CryptoKLineResponse,
+    CryptoKLinesResponse,
+    CryptoOrderBookResponse,
+    CryptoPaperAccountResponse,
+    CryptoPaperEquityCurveResponse,
+    CryptoPaperEquityPointResponse,
+    CryptoPaperLogResponse,
+    CryptoPaperLogsResponse,
+    CryptoPaperOrderResponse,
+    CryptoPaperOrdersResponse,
+    CryptoPaperPositionResponse,
+    CryptoPaperPositionsResponse,
+    CryptoShadowLogsResponse,
+    CryptoShadowPositionsResponse,
+    CryptoShadowTradeResponse,
+    CryptoQuoteResponse,
+    CryptoQuotesResponse,
+    CryptoStrategyBacktestResponse,
+    CryptoStrategyBacktestResultResponse,
+    ConflictResolutionDetailResponse,
+    CryptoStrategyResultResponse,
+    CryptoStrategyRunResponse,
+    CryptoStrategySignalResponse,
+    CryptoStrategySummaryResponse,
+    CryptoStrategyTemplateResponse,
+    CryptoStrategyTemplatesResponse,
+    CryptoWalkForwardResponse,
+    MacroOverviewResponse,
+    MarketRegimeResponse,
+    MarketRegimeBatchResponse,
+    WalkForwardRoundResponse,
+    WalkForwardStrategySummaryResponse,
+    WalkForwardSymbolSummaryResponse,
+    WalkForwardConfigResponse,
+)
+from core.binance_testnet_executor import BinanceTestnetExecutor
+from core.crypto_market_cache import CryptoMarketCache
+from core.crypto_market_data_provider import CryptoMarketDataProvider, normalize_crypto_symbol
+from core.crypto_paper_broker import CryptoPaperBrokerExecutor
+from core.crypto_backtest_engine import CryptoBacktestEngine
+from core.crypto_strategy_engine import CryptoStrategyEngine
+from core.macro_data_provider import MacroDataProvider
+from core.macro_risk import MacroRiskEvaluator
+from core.regime_detector import RegimeDetector
+from core.shadow_trading import ShadowTradingEngine
+from core.walk_forward_backtest import WalkForwardConfig, WalkForwardRunner
+
+
+class CryptoService:
+    """Facade for crypto public data and local paper trading."""
+
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
+        self.config = config or {}
+        crypto_config = self.config.get("crypto", {}) or {}
+        self.crypto_config = crypto_config
+        self.default_symbols = [
+            normalize_crypto_symbol(symbol, crypto_config.get("default_quote_currency", "USDT"))
+            for symbol in crypto_config.get("symbols", ["BTC/USDT", "ETH/USDT", "SOL/USDT"])
+        ]
+        self.default_symbols = [symbol for symbol in self.default_symbols if symbol]
+        provider_config = {
+            "exchange": crypto_config.get("exchange", "binance"),
+            "timeout": crypto_config.get("timeout", 10000),
+            "default_quote_currency": crypto_config.get("default_quote_currency", "USDT"),
+        }
+        self.provider = CryptoMarketDataProvider(provider_config)
+        storage_config = self.config.get("storage", {}) or {}
+        self.market_cache = CryptoMarketCache(
+            storage_config.get("crypto_market_db_path") or storage_config.get("db_path") or "data/trading.db"
+        )
+        paper_config = {
+            "default_quote_currency": crypto_config.get("default_quote_currency", "USDT"),
+            "storage_path": storage_config.get("crypto_paper_db_path") or storage_config.get("db_path") or "data/trading.db",
+            **(crypto_config.get("paper", {}) or {}),
+        }
+        self.paper_broker = CryptoPaperBrokerExecutor(paper_config)
+        self.shadow_engine = ShadowTradingEngine(self.provider)
+        testnet_config = dict(crypto_config.get("testnet", {}) or {})
+        mainnet_config = dict(crypto_config.get("mainnet", {}) or {})
+        testnet_config["mainnet_real_trading_enabled"] = bool(mainnet_config.get("real_trading_enabled", False))
+        self.testnet_executor = BinanceTestnetExecutor(testnet_config, storage_config)
+        self.strategy_engine = CryptoStrategyEngine()
+        macro_config = dict(crypto_config.get("macro", {}) or {})
+        self.macro_provider = MacroDataProvider(
+            fred_api_key=os.environ.get("FRED_API_KEY") or macro_config.get("fred_api_key")
+        )
+        self.macro_evaluator = MacroRiskEvaluator()
+        self._macro_cache: MacroOverviewResponse | None = None
+        self._macro_cache_time = 0.0
+
+    async def get_quotes(self, symbols: Optional[list[str]] = None) -> CryptoQuotesResponse:
+        target_symbols = self._normalize_symbols(symbols or self.default_symbols)
+        if not target_symbols:
+            return CryptoQuotesResponse(items=[], count=0, source="ccxt")
+        try:
+            rows = self.provider.fetch_quotes(target_symbols)
+            self.record_quote_snapshots(rows)
+        except Exception as exc:
+            cached_rows = self.market_cache.get_quotes(target_symbols)
+            if cached_rows:
+                items = [CryptoQuoteResponse(**row) for row in cached_rows]
+                return CryptoQuotesResponse(items=items, count=len(items), source="cache_binance")
+            raise ApiError(
+                503,
+                f"Crypto market data source unavailable and no local cache is available: {exc}",
+                ErrorCode.INTERNAL_SERVER_ERROR,
+            ) from exc
+        items = [CryptoQuoteResponse(**row) for row in rows]
+        source = rows[0].get("source", "ccxt") if rows else "ccxt"
+        return CryptoQuotesResponse(items=items, count=len(items), source=str(source))
+
+    async def get_klines(self, symbol: str, period: str = "1h", limit: int = 200) -> CryptoKLinesResponse:
+        normalized_symbol = normalize_crypto_symbol(symbol, self.crypto_config.get("default_quote_currency", "USDT"))
+        if not normalized_symbol:
+            raise ApiError(400, "symbol is required", ErrorCode.BAD_REQUEST)
+        try:
+            rows = self.provider.fetch_ohlcv(normalized_symbol, timeframe=period, limit=limit)
+            self.record_klines(rows)
+        except ValueError as exc:
+            raise ApiError(400, str(exc), ErrorCode.BAD_REQUEST) from exc
+        except Exception as exc:
+            cached_rows = self.market_cache.get_klines(normalized_symbol, str(period or "1h"), limit=limit)
+            if cached_rows:
+                items = [CryptoKLineResponse(**row) for row in cached_rows]
+                response_period = items[0].period if items else str(period)
+                return CryptoKLinesResponse(
+                    symbol=normalized_symbol,
+                    period=response_period,
+                    items=items,
+                    count=len(items),
+                    source="cache_binance",
+                )
+            raise ApiError(
+                503,
+                f"Crypto market data source unavailable and no local cache is available: {exc}",
+                ErrorCode.INTERNAL_SERVER_ERROR,
+            ) from exc
+        items = [CryptoKLineResponse(**row) for row in rows]
+        response_period = items[0].period if items else str(period)
+        return CryptoKLinesResponse(
+            symbol=normalized_symbol,
+            period=response_period,
+            items=items,
+            count=len(items),
+            source=str(self.crypto_config.get("exchange", "binance")),
+        )
+
+    async def get_orderbook(self, symbol: str, limit: int = 20) -> CryptoOrderBookResponse:
+        """Fetch current order book depth for a symbol."""
+        normalized_symbol = normalize_crypto_symbol(symbol, self.crypto_config.get("default_quote_currency", "USDT"))
+        if not normalized_symbol:
+            raise ApiError(400, "symbol is required", ErrorCode.BAD_REQUEST)
+        try:
+            book = self.provider.fetch_order_book(normalized_symbol, limit=limit)
+        except ValueError as exc:
+            raise ApiError(400, str(exc), ErrorCode.BAD_REQUEST) from exc
+        except Exception as exc:
+            raise ApiError(
+                503,
+                f"Crypto market data source unavailable: {exc}",
+                ErrorCode.INTERNAL_SERVER_ERROR,
+            ) from exc
+        return CryptoOrderBookResponse(**book)
+
+    async def detect_market_regime(
+        self,
+        symbols: list[str],
+        period: str = "1h",
+        limit: int = 100,
+    ) -> MarketRegimeBatchResponse:
+        """Detect the market regime for one or more crypto symbols."""
+        detector = RegimeDetector()
+        items: list[MarketRegimeResponse] = []
+        market_data = await self._load_strategy_market_data(symbols, period, limit)
+
+        for symbol, candles in market_data.items():
+            closes = [float(row.get("close", 0) or 0) for row in candles]
+            highs = [float(row.get("high", 0) or 0) for row in candles]
+            lows = [float(row.get("low", 0) or 0) for row in candles]
+            volumes = [float(row.get("volume", 0) or 0) for row in candles]
+
+            funding_rate = None
+            orderbook_bid_depth = None
+            orderbook_ask_depth = None
+            open_interest_current = None
+
+            try:
+                funding = self.provider.fetch_funding_rate(symbol)
+                if funding:
+                    funding_rate = float(funding.get("funding_rate", 0) or 0)
+            except Exception:
+                funding_rate = None
+
+            try:
+                open_interest = self.provider.fetch_open_interest(symbol)
+                if open_interest:
+                    open_interest_current = float(open_interest.get("open_interest", 0) or 0)
+            except Exception:
+                open_interest_current = None
+
+            try:
+                orderbook = self.provider.fetch_order_book(symbol, limit=5)
+                if orderbook:
+                    orderbook_bid_depth = sum(float(level[1] or 0) for level in (orderbook.get("bids") or [])[:5])
+                    orderbook_ask_depth = sum(float(level[1] or 0) for level in (orderbook.get("asks") or [])[:5])
+            except Exception:
+                orderbook_bid_depth = None
+                orderbook_ask_depth = None
+
+            result = detector.detect(
+                closes=closes,
+                highs=highs,
+                lows=lows,
+                volumes=volumes,
+                funding_rate=funding_rate,
+                orderbook_bid_depth=orderbook_bid_depth,
+                orderbook_ask_depth=orderbook_ask_depth,
+                open_interest_current=open_interest_current,
+                open_interest_previous=None,
+            )
+            items.append(
+                MarketRegimeResponse(
+                    symbol=symbol,
+                    regime=result.regime.value,
+                    score=result.score,
+                    confidence=result.confidence,
+                    description=result.description,
+                    features=asdict(result.features),
+                    timestamp=str(candles[-1].get("end_time") or candles[-1].get("start_time") or "") if candles else "",
+                )
+            )
+        return MarketRegimeBatchResponse(items=items, count=len(items))
+
+    async def get_macro_overview(self) -> MacroOverviewResponse:
+        """Get macro data and the current three-level macro gate."""
+        now = time.time()
+        if self._macro_cache is not None and now - self._macro_cache_time < 300:
+            return self._macro_cache
+
+        snapshot = self.macro_provider.fetch_snapshot()
+        gate = self.macro_evaluator.evaluate(snapshot)
+        response = MacroOverviewResponse(data=snapshot.to_dict(), gate=gate.to_dict())
+        self._macro_cache = response
+        self._macro_cache_time = now
+        return response
+
+    async def place_paper_order(self, request: CryptoPaperOrderRequest) -> CryptoPaperOrderResponse:
+        order = self.paper_broker.place_order(
+            symbol=request.symbol,
+            action=request.action,
+            quantity=request.quantity,
+            price=request.price,
+            strategy=request.strategy,
+            order_type=request.order_type,
+        )
+        return CryptoPaperOrderResponse(**order.to_response())
+
+    async def get_paper_orders(
+        self,
+        status: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> CryptoPaperOrdersResponse:
+        page = self.paper_broker.get_orders(status=status, limit=limit, offset=offset)
+        return CryptoPaperOrdersResponse(
+            items=[CryptoPaperOrderResponse(**item) for item in page["items"]],
+            count=page["count"],
+            total=page["total"],
+            limit=page["limit"],
+            offset=page["offset"],
+        )
+
+    async def cancel_paper_order(self, order_id: str) -> dict[str, Any]:
+        success = self.paper_broker.cancel_order(order_id)
+        return {
+            "success": success,
+            "message": "crypto paper order cancelled" if success else "crypto paper order cannot be cancelled",
+        }
+
+    async def get_paper_account(self) -> CryptoPaperAccountResponse:
+        account = self.paper_broker.get_account_info()
+        return CryptoPaperAccountResponse(
+            broker_name=str(account.get("broker_name", "CryptoPaperBroker")),
+            quote_currency=str(account.get("quote_currency", "USDT")),
+            initial_cash=float(account.get("initial_cash", 0) or 0),
+            cash=float(account.get("cash", 0) or 0),
+            available_cash=float(account.get("available_cash", 0) or 0),
+            market_value=float(account.get("market_value", 0) or 0),
+            equity=float(account.get("equity", 0) or 0),
+            total_profit=float(account.get("total_profit", 0) or 0),
+            total_return_percent=float(account.get("total_return_percent", 0) or 0),
+            total_trades=int(account.get("total_trades", 0) or 0),
+            total_fee=float(account.get("total_fee", 0) or 0),
+            position_count=len(account.get("positions", []) or []),
+            real_trading_enabled=bool(account.get("real_trading_enabled", False)),
+        )
+
+    async def get_paper_positions(self) -> CryptoPaperPositionsResponse:
+        positions = self.paper_broker.get_positions()
+        items = [CryptoPaperPositionResponse(**position) for position in positions]
+        return CryptoPaperPositionsResponse(
+            items=items,
+            count=len(items),
+            total_market_value=sum(float(item.market_value or 0) for item in items),
+            total_unrealized_pnl=sum(float(item.unrealized_pnl or 0) for item in items),
+        )
+
+    async def get_paper_equity_curve(self, limit: int = 200) -> CryptoPaperEquityCurveResponse:
+        points = [CryptoPaperEquityPointResponse(**item) for item in self.paper_broker.get_equity_curve(limit)]
+        return CryptoPaperEquityCurveResponse(items=points, count=len(points))
+
+    async def get_paper_logs(self, limit: int = 100) -> CryptoPaperLogsResponse:
+        logs = [CryptoPaperLogResponse(**item) for item in self.paper_broker.get_paper_logs(limit)]
+        return CryptoPaperLogsResponse(items=logs, count=len(logs))
+
+    async def place_shadow_order(self, request: CryptoShadowOrderRequest) -> CryptoShadowTradeResponse:
+        record = self.shadow_engine.execute_shadow_trade(
+            symbol=request.symbol,
+            action=request.action,
+            quantity=request.quantity,
+            strategy_id=request.strategy_id,
+            sl_price=request.stop_loss_price,
+            tp_price=request.take_profit_price,
+        )
+        return CryptoShadowTradeResponse(**record)
+
+    async def get_shadow_positions(self) -> CryptoShadowPositionsResponse:
+        items = [CryptoShadowPositionResponse(**item) for item in self.shadow_engine.get_positions()]
+        return CryptoShadowPositionsResponse(items=items, count=len(items))
+
+    async def get_shadow_logs(self, limit: int = 100) -> CryptoShadowLogsResponse:
+        rows = self.shadow_engine.trade_log[-max(1, min(int(limit or 100), 500)) :]
+        items = [CryptoShadowTradeResponse(**item) for item in rows]
+        return CryptoShadowLogsResponse(items=items, count=len(items))
+
+    async def get_testnet_status(self) -> BinanceTestnetStatusResponse:
+        return BinanceTestnetStatusResponse(**self.testnet_executor.status())
+
+    async def save_testnet_credentials(self, request: BinanceTestnetCredentialsRequest) -> BinanceTestnetActionResponse:
+        return BinanceTestnetActionResponse(**self.testnet_executor.save_credentials(request.api_key, request.api_secret))
+
+    async def clear_testnet_credentials(self) -> BinanceTestnetActionResponse:
+        return BinanceTestnetActionResponse(**self.testnet_executor.clear_credentials())
+
+    async def enable_testnet_orders(self, request: BinanceTestnetEnableRequest) -> BinanceTestnetActionResponse:
+        return BinanceTestnetActionResponse(**self.testnet_executor.enable_testnet_orders(request.confirmation_phrase))
+
+    async def place_testnet_order(self, request: BinanceTestnetOrderRequest) -> BinanceTestnetOrderResponse:
+        order = self.testnet_executor.place_order(
+            symbol=request.symbol,
+            action=request.action,
+            quantity=request.quantity,
+            price=request.price,
+            order_type=request.order_type,
+            dry_run=request.dry_run,
+        )
+        return BinanceTestnetOrderResponse(**order.to_response())
+
+    async def get_strategy_templates(self) -> CryptoStrategyTemplatesResponse:
+        items = [CryptoStrategyTemplateResponse(**item) for item in self.strategy_engine.list_templates()]
+        return CryptoStrategyTemplatesResponse(items=items, count=len(items))
+
+    async def run_strategies(self, request: CryptoStrategyRunRequest) -> CryptoStrategyRunResponse:
+        timeframes = request.timeframes or [request.period]
+        configs = self.strategy_engine.normalize_configs([item.model_dump() for item in request.strategies], request.symbols)
+        if len(timeframes) > 1:
+            result = await self.run_strategies_multi_timeframe(request)
+        else:
+            market_data = await self._load_strategy_market_data(request.symbols, timeframes[0], request.limit)
+            regimes, regime_scores = self._detect_regimes_from_market_data(market_data)
+            macro_gate = self.macro_evaluator.evaluate(self.macro_provider.fetch_snapshot())
+            result = self.strategy_engine.run(
+                market_data,
+                configs,
+                conflict_threshold=request.conflict_threshold,
+                regimes=regimes,
+                regime_scores=regime_scores,
+                macro_gate=macro_gate,
+            )
+        return CryptoStrategyRunResponse(
+            signals=[CryptoStrategySignalResponse(**item) for item in result["signals"]],
+            winners=[ConflictResolutionDetailResponse(**item) for item in result.get("winners", [])],
+            blocked=[ConflictResolutionDetailResponse(**item) for item in result.get("blocked", [])],
+            audit_trails=result.get("audit_trails", []),
+            summary=[CryptoStrategySummaryResponse(**item) for item in result["summary"]],
+            strategy_results=[CryptoStrategyResultResponse(**item) for item in result["strategy_results"]],
+        )
+
+    async def run_strategies_multi_timeframe(self, request: CryptoStrategyRunRequest) -> dict[str, Any]:
+        """Run crypto strategies across multiple timeframes with conflict resolution."""
+        timeframes = request.timeframes or [request.period]
+        market_data = await self._load_multi_timeframe_market_data(request.symbols, timeframes, request.limit)
+        configs = self.strategy_engine.normalize_configs([item.model_dump() for item in request.strategies], request.symbols)
+
+        primary_data = market_data.get(request.period) or next(iter(market_data.values()), {})
+        regimes, regime_scores = self._detect_regimes_from_market_data(primary_data)
+        macro_gate = self.macro_evaluator.evaluate(self.macro_provider.fetch_snapshot())
+        return self.strategy_engine.run_multi_timeframe(
+            market_data=market_data,
+            configs=configs,
+            conflict_threshold=request.conflict_threshold,
+            regimes=regimes,
+            regime_scores=regime_scores,
+            macro_gate=macro_gate,
+            max_positions=request.max_positions,
+        )
+
+    async def backtest_strategies(self, request: CryptoStrategyBacktestRequest) -> CryptoStrategyBacktestResponse:
+        market_data = await self._load_strategy_market_data(request.symbols, request.period, request.limit)
+        configs = self.strategy_engine.normalize_configs([item.model_dump() for item in request.strategies], request.symbols)
+        engine = CryptoBacktestEngine(
+            initial_cash=request.initial_cash,
+            fee_rate=request.fee_rate,
+            slippage_rate=request.slippage_rate,
+            min_quantity=request.min_quantity,
+            position_sizing=request.position_sizing,
+            period=request.period,
+        )
+        results = engine.run_many(market_data, configs)
+        items = [CryptoStrategyBacktestResultResponse(**item) for item in results]
+        return CryptoStrategyBacktestResponse(items=items, count=len(items))
+
+    async def walk_forward_backtest(self, request: CryptoStrategyWalkForwardRequest) -> CryptoWalkForwardResponse:
+        """Run walk-forward backtest with rolling training/validation windows."""
+        market_data = await self._load_strategy_market_data(request.symbols, request.period, request.limit)
+        configs = self.strategy_engine.normalize_configs(
+            [item.model_dump() for item in request.strategies], request.symbols
+        )
+
+        wf_config = WalkForwardConfig(
+            train_ratio=request.train_ratio,
+            validation_ratio=request.validation_ratio,
+            min_train_candles=request.min_train_candles,
+            step_size=request.step_size,
+            perturbation_runs=request.perturbation_runs,
+            perturbation_pct=request.perturbation_pct,
+            initial_cash=request.initial_cash,
+            fee_rate=request.fee_rate,
+            slippage_rate=request.slippage_rate,
+            min_quantity=request.min_quantity,
+            period=request.period,
+        )
+        runner = WalkForwardRunner(config=wf_config)
+        param_grids = request.param_grid if request.param_grid else None
+        result = runner.run(market_data, configs, param_grids=param_grids)
+
+        return CryptoWalkForwardResponse(
+            rounds=[WalkForwardRoundResponse(**r) for r in result["rounds"]],
+            by_strategy=[WalkForwardStrategySummaryResponse(**s) for s in result["by_strategy"]],
+            by_symbol=[WalkForwardSymbolSummaryResponse(**s) for s in result["by_symbol"]],
+            factor_audit=result["factor_audit"],
+            config=WalkForwardConfigResponse(**result["config"]) if result.get("config") else None,
+        )
+
+    def record_quote_snapshots(self, rows: list[dict[str, Any]]) -> None:
+        self.market_cache.upsert_quotes(rows)
+
+    def record_klines(self, rows: list[dict[str, Any]]) -> None:
+        self.market_cache.upsert_klines(rows)
+
+    async def get_connection_health(self) -> ConnectionHealthResponse:
+        return ConnectionHealthResponse(**self.provider.get_connection_health())
+
+    async def _load_strategy_market_data(self, symbols: list[str], period: str, limit: int) -> dict[str, list[dict[str, Any]]]:
+        market_data: dict[str, list[dict[str, Any]]] = {}
+        for symbol in self._normalize_symbols(symbols):
+            response = await self.get_klines(symbol=symbol, period=period, limit=limit)
+            market_data[symbol] = [item.model_dump() for item in response.items]
+        return market_data
+
+    async def _load_multi_timeframe_market_data(
+        self,
+        symbols: list[str],
+        timeframes: list[str],
+        limit: int,
+    ) -> dict[str, dict[str, list[dict[str, Any]]]]:
+        import asyncio
+
+        async def load_one(timeframe: str) -> tuple[str, dict[str, list[dict[str, Any]]]]:
+            return timeframe, await self._load_strategy_market_data(symbols, timeframe, limit)
+
+        tasks = [load_one(timeframe) for timeframe in timeframes]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        market_data: dict[str, dict[str, list[dict[str, Any]]]] = {}
+        for result in results:
+            if isinstance(result, Exception):
+                continue
+            timeframe, data = result
+            market_data[timeframe] = data
+        return market_data
+
+    def _detect_regimes_from_market_data(
+        self,
+        market_data: dict[str, list[dict[str, Any]]],
+    ) -> tuple[dict[str, str], dict[str, float]]:
+        regimes: dict[str, str] = {}
+        regime_scores: dict[str, float] = {}
+        detector = RegimeDetector()
+        for symbol, candles in market_data.items():
+            closes = [float(row.get("close", 0) or 0) for row in candles]
+            highs = [float(row.get("high", 0) or 0) for row in candles]
+            lows = [float(row.get("low", 0) or 0) for row in candles]
+            volumes = [float(row.get("volume", 0) or 0) for row in candles]
+            result = detector.detect(closes=closes, highs=highs, lows=lows, volumes=volumes)
+            regimes[symbol] = result.regime.value
+            regime_scores[symbol] = result.score
+        return regimes, regime_scores
+
+    def _normalize_symbols(self, symbols: list[str]) -> list[str]:
+        normalized: list[str] = []
+        quote_currency = self.crypto_config.get("default_quote_currency", "USDT")
+        for symbol in symbols:
+            item = normalize_crypto_symbol(symbol, quote_currency)
+            if item and item not in normalized:
+                normalized.append(item)
+        return normalized

@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Node / frontend
+node_modules/
+frontend/node_modules/
+desktop/node_modules/
+frontend/dist/
+
+# Build outputs
+build/
+dist/
+release/
+*.exe
+*.msi
+*.zip
+*.7z
+
+# Runtime data
+data/*.db
+data/*.db-*
+data/*.sqlite
+data/*.sqlite3
+data/*.bak
+data/*.lock
+data/*.enc
+data/*.key
+data/*.csv
+logs/
+
+# Local config and credentials
+config/config.yaml
+.env
+.env.*
+!.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# OS / editor noise
+Thumbs.db
+Desktop.ini
+.DS_Store
+.vscode/*.log

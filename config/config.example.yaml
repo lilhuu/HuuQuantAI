@@ -1,0 +1,73 @@
+crypto:
+  enabled: true
+  exchange: binance
+  default_quote_currency: USDT
+  timeout: 10000
+  symbols:
+    - BTC/USDT
+    - ETH/USDT
+    - SOL/USDT
+  paper:
+    broker_name: CryptoPaperBroker
+    initial_cash: 10000
+    fee_rate: 0.001
+    slippage_rate: 0.0005
+    paper_order_enabled: true
+    real_trading_enabled: false
+    max_order_notional: 2000
+    max_position_ratio: 0.5
+    partial_fill_enabled: true
+    partial_fill_min_notional: 3000
+    partial_fill_ratio: 0.6
+    quantity_precision: 8
+    price_precision: 8
+  testnet:
+    enabled: false
+    exchange: binance
+    base_url: https://testnet.binance.vision
+    api_key: ${BINANCE_TESTNET_API_KEY}
+    api_secret: ${BINANCE_TESTNET_API_SECRET}
+    credential_store_path: data/binance_testnet_credentials.enc
+    credential_key_path: data/binance_testnet.key
+    real_trading_enabled: false
+    dry_run: true
+    required_confirmation: I_UNDERSTAND_CRYPTO_TESTNET
+    confirm_testnet_trading: ''
+  mainnet:
+    enabled: false
+    real_trading_enabled: false
+  macro:
+    enabled: true
+    fred_api_key: ${FRED_API_KEY}
+
+risk:
+  max_order_notional: 2000
+  max_symbol_position_ratio: 0.5
+  max_total_position_ratio: 0.8
+  max_daily_trades: 30
+  allow_short_selling: false
+  allow_leverage: false
+  real_trading_enabled: false
+
+trading:
+  mode: crypto_paper
+  real_trading_enabled: false
+  dry_run: true
+  connect_on_init: false
+
+storage:
+  db_path: data/trading.db
+  csv_path: data/crypto_quotes.csv
+  max_history_days: 30
+
+database:
+  engine: sqlite
+  sqlite_path: data/trading.db
+  postgres_url: ${AUTO_TRADER_POSTGRES_URL}
+  pool_size: 5
+  max_overflow: 10
+  pool_pre_ping: true
+
+system:
+  auto_start: false
+  status_interval: 30

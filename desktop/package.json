@@ -1,0 +1,49 @@
+{
+  "name": "auto-trader-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HUU Auto Trade Console desktop shell",
+  "main": "main.js",
+  "scripts": {
+    "dev": "electron .",
+    "dist": "electron-builder --win portable --x64"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.huu.autotrader",
+    "productName": "HUU Auto Trade Console",
+    "asar": true,
+    "electronDist": "node_modules/electron/dist",
+    "electronVersion": "31.7.7",
+    "directories": {
+      "output": "../release"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "loading.html",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist/desktop-backend/auto_trader_backend.exe",
+        "to": "backend/auto_trader_backend.exe"
+      }
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "HUU Auto Trade Console.exe"
+    }
+  }
+}
