@@ -12,7 +12,7 @@ from core.crypto_backtest_engine import CryptoBacktestEngine
 from core.crypto_market_data_provider import CryptoMarketDataProvider
 from core.crypto_paper_broker import CryptoPaperBrokerExecutor
 from core.crypto_strategy_engine import CryptoStrategyEngine
-from strategies.parameter_optimizer import CryptoStrategyParameterOptimizer
+from core.parameter_optimizer import CryptoStrategyParameterOptimizer
 
 
 def test_crypto_paper_broker_buy_sell_and_rejects():
