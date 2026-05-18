@@ -39,6 +39,7 @@ async def crypto_market_socket(websocket: WebSocket) -> None:
     depth_limit = max(1, min(depth_limit, 20))
 
     service = get_crypto_service()
+    proxy = (service.crypto_config.get("proxy") or "").strip() or None
     await websocket.send_json(
         {
             "type": "crypto_status",
@@ -62,6 +63,7 @@ async def crypto_market_socket(websocket: WebSocket) -> None:
             period=period,
             selected_symbol=selected_symbol,
             depth_limit=depth_limit,
+            proxy=proxy,
         )
     except WebSocketDisconnect:
         return

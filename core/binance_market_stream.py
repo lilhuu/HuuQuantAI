@@ -163,6 +163,7 @@ async def stream_binance_market(
     period: str = "1h",
     depth_limit: int = 20,
     selected_symbol: str | None = None,
+    proxy: str | None = None,
 ) -> None:
     """Proxy Binance Spot market streams to the connected frontend websocket."""
     try:
@@ -186,7 +187,7 @@ async def stream_binance_market(
             }
         )
         try:
-            async with websockets.connect(url, ping_interval=20, ping_timeout=20, close_timeout=5) as upstream:
+            async with websockets.connect(url, ping_interval=20, ping_timeout=20, close_timeout=5, proxy=proxy or True) as upstream:
                 reconnect_attempt = 0
                 await websocket.send_json(
                     {

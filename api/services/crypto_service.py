@@ -87,6 +87,7 @@ class CryptoService:
             "exchange": crypto_config.get("exchange", "binance"),
             "timeout": crypto_config.get("timeout", 10000),
             "default_quote_currency": crypto_config.get("default_quote_currency", "USDT"),
+            "proxy": crypto_config.get("proxy", "") or "",
         }
         self.provider = CryptoMarketDataProvider(provider_config)
         storage_config = self.config.get("storage", {}) or {}

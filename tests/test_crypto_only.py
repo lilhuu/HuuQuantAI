@@ -549,7 +549,7 @@ def test_crypto_websocket_auth_and_status(monkeypatch, tmp_path):
     auth_service = AuthService(storage_path=str(tmp_path / "auth.db"))
     session = auth_service.bootstrap_user(username="tester", password="password123", display_name="Tester")
 
-    async def fake_stream(websocket, service, symbols, period="1h", depth_limit=20, selected_symbol=None):
+    async def fake_stream(websocket, service, symbols, period="1h", depth_limit=20, selected_symbol=None, proxy=None):
         await websocket.send_json(
             {
                 "type": "crypto_status",

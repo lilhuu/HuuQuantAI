@@ -7,6 +7,7 @@ crypto:
     - BTC/USDT
     - ETH/USDT
     - SOL/USDT
+  proxy: ""  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" for Mainland China users
   paper:
     broker_name: CryptoPaperBroker
     initial_cash: 10000

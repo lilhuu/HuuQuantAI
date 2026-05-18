@@ -46,6 +46,7 @@ class CryptoMarketDataProvider:
         self.exchange_id = str(self.config.get("exchange", "binance")).strip().lower() or "binance"
         self.timeout = int(self.config.get("timeout", 10000) or 10000)
         self.default_quote_currency = str(self.config.get("default_quote_currency", "USDT") or "USDT")
+        self.proxy = str(self.config.get("proxy", "") or "").strip()
         self._exchange = None
         retryable = (ConnectionError, TimeoutError, OSError, RuntimeError)
         self._retry_config = RetryConfig(
@@ -212,12 +213,17 @@ class CryptoMarketDataProvider:
         if exchange_cls is None:
             raise RuntimeError(f"unsupported crypto exchange: {self.exchange_id}")
 
-        self._exchange = exchange_cls(
-            {
-                "enableRateLimit": True,
-                "timeout": self.timeout,
+        exchange_params: Dict[str, Any] = {
+            "enableRateLimit": True,
+            "timeout": self.timeout,
+        }
+        if self.proxy:
+            exchange_params["proxies"] = {
+                "http": self.proxy,
+                "https": self.proxy,
             }
-        )
+
+        self._exchange = exchange_cls(exchange_params)
         return self._exchange
 
     def _derivative_symbol(self, symbol: str) -> str:
