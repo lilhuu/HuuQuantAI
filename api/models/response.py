@@ -307,6 +307,57 @@ class CryptoPaperLogsResponse(BaseModel):
     count: int = 0
 
 
+class AutoTradingDecisionResponse(BaseModel):
+    """One automatic paper-trading decision."""
+
+    timestamp: str = ""
+    symbol: str = ""
+    action: str = ""
+    price: float = 0.0
+    quantity: float = 0.0
+    notional: float = 0.0
+    strategy_id: str = ""
+    confidence: float = 0.0
+    reason: str = ""
+    status: str = "skipped"
+    message: str = ""
+    place_orders: bool = False
+
+
+class AutoTradingLogResponse(BaseModel):
+    """One automatic trading runtime log."""
+
+    timestamp: str = ""
+    level: str = "INFO"
+    event: str = ""
+    message: str = ""
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class AutoTradingStatusResponse(BaseModel):
+    """Paper-only automatic trading status."""
+
+    state: str = "stopped"
+    enabled: bool = False
+    mode: str = "paper"
+    config: dict[str, Any] = Field(default_factory=dict)
+    last_run_at: str = ""
+    last_message: str = ""
+    cycle_count: int = 0
+    signal_count: int = 0
+    order_count: int = 0
+    last_decisions: list[AutoTradingDecisionResponse] = Field(default_factory=list)
+    logs: list[AutoTradingLogResponse] = Field(default_factory=list)
+    real_trading_enabled: bool = False
+
+
+class AutoTradingLogsResponse(BaseModel):
+    """Automatic trading runtime logs."""
+
+    items: list[AutoTradingLogResponse] = Field(default_factory=list)
+    count: int = 0
+
+
 class CryptoShadowTradeResponse(BaseModel):
     """Shadow trade simulation report."""
 
@@ -448,6 +499,65 @@ class PortfolioReturnsResponse(BaseModel):
     by_symbol: list[PortfolioReturnGroupResponse] = Field(default_factory=list)
     by_strategy: list[PortfolioReturnGroupResponse] = Field(default_factory=list)
     history: list[PortfolioReturnRowResponse] = Field(default_factory=list)
+
+
+class AiSignalAdviceResponse(BaseModel):
+    """Structured AI advisory signal."""
+
+    symbol: str = ""
+    action: str = "HOLD"
+    confidence: float = 0.0
+    suggested_notional_usdt: float = 0.0
+    max_loss_usdt: float = 0.0
+    time_horizon: str = ""
+    reason: str = ""
+    risk_notes: list[str] = Field(default_factory=list)
+    invalid_if: list[str] = Field(default_factory=list)
+
+
+class AiSignalRecordResponse(BaseModel):
+    """Persisted AI signal and local approval state."""
+
+    signal_id: str = ""
+    symbol: str = ""
+    period: str = "1h"
+    model: str = ""
+    request_summary: dict[str, Any] = Field(default_factory=dict)
+    response: AiSignalAdviceResponse = Field(default_factory=AiSignalAdviceResponse)
+    action: str = "HOLD"
+    confidence: float = 0.0
+    approval_status: str = "pending_review"
+    approval_reason: str = ""
+    approved_notional_usdt: float = 0.0
+    linked_order_id: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class AiSignalAnalyzeResponse(BaseModel):
+    """AI advisory analysis response."""
+
+    signal: AiSignalRecordResponse
+    context_summary: dict[str, Any] = Field(default_factory=dict)
+
+
+class AiSignalListResponse(BaseModel):
+    """AI signal history page."""
+
+    items: list[AiSignalRecordResponse] = Field(default_factory=list)
+    count: int = 0
+    total: int = 0
+    limit: int = 100
+    offset: int = 0
+
+
+class AiSignalPaperOrderResponse(BaseModel):
+    """Manual conversion from approved AI signal to paper order."""
+
+    success: bool = False
+    message: str = ""
+    signal: AiSignalRecordResponse
+    order: CryptoPaperOrderResponse | None = None
 
 
 class BinanceTestnetStatusResponse(BaseModel):

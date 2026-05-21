@@ -3,10 +3,12 @@ import { computed, onBeforeUnmount, onMounted, watch } from "vue";
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 
 import { useAuthStore } from "./stores/auth";
+import { useAutoTradingStore } from "./stores/autoTrading";
 import { useTradingStore } from "./stores/trading";
 import { normalizeCryptoSymbol } from "./stores/tradingUtils";
 
 const authStore = useAuthStore();
+const autoStore = useAutoTradingStore();
 const store = useTradingStore();
 const route = useRoute();
 const router = useRouter();
@@ -14,7 +16,8 @@ const router = useRouter();
 const navItems = [
   { label: "仪表盘", icon: "grid", to: "/" },
   { label: "市场分析", icon: "trend", to: "/market" },
-  { label: "交易历史", icon: "clock", to: "/trade" },
+  { label: "手动交易", icon: "clock", to: "/trade" },
+  { label: "自动交易", icon: "target", to: "/auto" },
   { label: "账户状态", icon: "wallet", to: "/account" },
   { label: "组合分析", icon: "wallet", to: "/portfolio" },
   { label: "策略验证", icon: "flask", to: "/strategy" },
@@ -46,10 +49,10 @@ async function initializeWorkbench() {
   try {
     await authStore.ensureInitialized();
     await store.loadUserPreferences();
-    await store.bootstrap();
+    await Promise.allSettled([store.bootstrap(), autoStore.fetchStatus()]);
     store.connectRealtimeStreams();
   } catch (error) {
-    store.setError(error, "初始化加密货币工作台失败");
+    store.setError(error, "初始化 HuuQuantAI 工作台失败");
   }
 }
 
@@ -72,6 +75,7 @@ async function changeSymbol() {
 async function refreshWorkspace() {
   await Promise.allSettled([
     store.refreshOverview(),
+    autoStore.fetchStatus(),
     store.fetchCryptoQuotes(store.cryptoWatchSymbols),
     store.fetchCryptoKlines({
       symbol: store.selectedCryptoSymbol,
@@ -175,7 +179,7 @@ watch(
         <div class="cq-top-actions">
           <div class="cq-mode-card">
             <span>自动交易</span>
-            <strong>stopped</strong>
+            <strong>{{ autoStore.stateLabel }}</strong>
           </div>
           <div class="cq-mode-card">
             <span>账户模式</span>

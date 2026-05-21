@@ -77,6 +77,22 @@ class PortfolioReturnsRequest(BaseModel):
     capital_base: float = Field(default=0.0, ge=0)
 
 
+class AiSignalAnalyzeRequest(BaseModel):
+    """Manual AI advisory signal analysis request."""
+
+    symbol: str = Field(..., min_length=1, max_length=32, examples=["BTC/USDT"])
+    period: Literal["1m", "5m", "15m", "1h", "4h", "1d"] = "1h"
+    limit: int = Field(default=120, ge=30, le=500)
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_ai_signal_symbol(cls, value: str) -> str:
+        normalized = normalize_crypto_symbol(value)
+        if not normalized:
+            raise ValueError("symbol is required")
+        return normalized
+
+
 class BinanceTestnetCredentialsRequest(BaseModel):
     """Local Binance Spot Testnet credential save request."""
 
@@ -123,6 +139,30 @@ class CryptoStrategyConfigRequest(BaseModel):
     @classmethod
     def normalize_strategy_symbols(cls, value: list[str]) -> list[str]:
         return [symbol for symbol in (normalize_crypto_symbol(item) for item in value or []) if symbol]
+
+
+class AutoTradingConfigRequest(BaseModel):
+    """Paper-only automatic trading runtime config."""
+
+    enabled: bool = False
+    mode: Literal["paper"] = "paper"
+    symbols: list[str] = Field(default_factory=lambda: ["BTC/USDT", "ETH/USDT", "SOL/USDT"])
+    period: Literal["1m", "5m", "15m", "1h", "4h", "1d"] = "1h"
+    timeframes: list[Literal["1m", "5m", "15m", "1h", "4h", "1d"]] = Field(default_factory=list)
+    scan_interval_seconds: int = Field(default=30, ge=5, le=3600)
+    max_positions: int = Field(default=3, ge=1, le=20)
+    per_trade_position_ratio: float = Field(default=0.1, ge=0.001, le=1)
+    max_order_notional: float = Field(default=1000, ge=1)
+    min_order_notional: float = Field(default=10, ge=0)
+    confidence_threshold: float = Field(default=0.35, ge=0, le=1)
+    real_trading_enabled: bool = False
+    strategies: list[CryptoStrategyConfigRequest] = Field(default_factory=list)
+
+    @field_validator("symbols")
+    @classmethod
+    def normalize_auto_symbols(cls, value: list[str]) -> list[str]:
+        normalized = [symbol for symbol in (normalize_crypto_symbol(item) for item in value or []) if symbol]
+        return normalized or ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
 
 
 class CryptoStrategyRunRequest(BaseModel):

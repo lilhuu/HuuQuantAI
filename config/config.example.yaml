@@ -64,6 +64,47 @@ trading:
   dry_run: true
   connect_on_init: false
 
+auto_trading:
+  enabled: false
+  mode: paper
+  symbols:
+    - BTC/USDT
+    - ETH/USDT
+    - SOL/USDT
+  period: 1h
+  timeframes: []
+  scan_interval_seconds: 30
+  max_positions: 3
+  per_trade_position_ratio: 0.1
+  max_order_notional: 1000
+  min_order_notional: 10
+  confidence_threshold: 0.35
+  real_trading_enabled: false
+  strategies:
+    - strategy_id: auto_rsi
+      type: rsi
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+      weight: 1.0
+      enabled: true
+      parameters:
+        period: 14
+        oversold: 30
+        overbought: 70
+        position_ratio: 0.08
+    - strategy_id: auto_macd
+      type: macd
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+      weight: 0.8
+      enabled: true
+      parameters:
+        position_ratio: 0.06
+
 storage:
   db_path: data/trading.db
   csv_path: data/crypto_quotes.csv

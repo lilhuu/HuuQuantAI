@@ -9,6 +9,8 @@ from typing import Any, Optional
 
 from api.error_codes import ApiError, ErrorCode
 from api.models.request import (
+    AiSignalAnalyzeRequest,
+    AutoTradingConfigRequest,
     BinanceTestnetCredentialsRequest,
     BinanceTestnetEnableRequest,
     BinanceTestnetOrderRequest,
@@ -20,6 +22,12 @@ from api.models.request import (
     PortfolioReturnsRequest,
 )
 from api.models.response import (
+    AiSignalAnalyzeResponse,
+    AiSignalListResponse,
+    AiSignalPaperOrderResponse,
+    AiSignalRecordResponse,
+    AutoTradingStatusResponse,
+    AutoTradingLogsResponse,
     BinanceTestnetActionResponse,
     BinanceTestnetOrderResponse,
     BinanceTestnetStatusResponse,
@@ -60,6 +68,14 @@ from api.models.response import (
     WalkForwardSymbolSummaryResponse,
     WalkForwardConfigResponse,
 )
+from core.ai_signal_advisor import (
+    AiAdvisorConfig,
+    AiSignalAdvisor,
+    AiSignalContextBuilder,
+    AiSignalStore,
+    validate_ai_advice,
+)
+from core.auto_trading_engine import AutoTradingEngine
 from core.binance_testnet_executor import BinanceTestnetExecutor
 from core.audit_trail import AuditLogger, AuditSQLiteStore
 from core.crypto_market_cache import CryptoMarketCache
@@ -115,6 +131,12 @@ class CryptoService:
         testnet_config["mainnet_real_trading_enabled"] = bool(mainnet_config.get("real_trading_enabled", False))
         self.testnet_executor = BinanceTestnetExecutor(testnet_config, storage_config)
         self.strategy_engine = CryptoStrategyEngine()
+        auto_config = dict(self.config.get("auto_trading", {}) or crypto_config.get("auto_trading", {}) or {})
+        if "symbols" not in auto_config:
+            auto_config["symbols"] = self.default_symbols
+        risk_config = self.config.get("risk", {}) or {}
+        auto_config.setdefault("max_order_notional", risk_config.get("max_order_notional", 1000))
+        self.auto_trading_engine = AutoTradingEngine(auto_config)
         macro_config = dict(crypto_config.get("macro", {}) or {})
         self.macro_provider = MacroDataProvider(
             fred_api_key=os.environ.get("FRED_API_KEY") or macro_config.get("fred_api_key")
@@ -122,6 +144,9 @@ class CryptoService:
         self.macro_evaluator = MacroRiskEvaluator()
         self._macro_cache: MacroOverviewResponse | None = None
         self._macro_cache_time = 0.0
+        self.ai_config = AiAdvisorConfig.from_dict(self.config.get("ai", {}) or {})
+        self.ai_advisor = AiSignalAdvisor(self.ai_config)
+        self.ai_store = AiSignalStore(storage_config.get("ai_signals_db_path") or sqlite_storage_path)
 
     async def get_quotes(self, symbols: Optional[list[str]] = None) -> CryptoQuotesResponse:
         target_symbols = self._normalize_symbols(symbols or self.default_symbols)
@@ -348,6 +373,67 @@ class CryptoService:
         logs = [CryptoPaperLogResponse(**item) for item in self.paper_broker.get_paper_logs(limit)]
         return CryptoPaperLogsResponse(items=logs, count=len(logs))
 
+    async def get_auto_trading_status(self) -> AutoTradingStatusResponse:
+        return AutoTradingStatusResponse(**self.auto_trading_engine.status())
+
+    async def update_auto_trading_config(self, request: AutoTradingConfigRequest) -> AutoTradingStatusResponse:
+        status = self.auto_trading_engine.update_config(request.model_dump())
+        return AutoTradingStatusResponse(**status)
+
+    async def start_auto_trading(self) -> AutoTradingStatusResponse:
+        self.auto_trading_engine.start()
+        return await self.run_auto_trading_cycle()
+
+    async def pause_auto_trading(self) -> AutoTradingStatusResponse:
+        return AutoTradingStatusResponse(**self.auto_trading_engine.pause())
+
+    async def stop_auto_trading(self) -> AutoTradingStatusResponse:
+        return AutoTradingStatusResponse(**self.auto_trading_engine.stop())
+
+    async def run_auto_trading_cycle(self) -> AutoTradingStatusResponse:
+        """Run one automatic strategy scan and paper-order pass."""
+        config = self.auto_trading_engine.config
+        place_orders = self.auto_trading_engine.state == "running" and config.enabled
+        try:
+            run_request = CryptoStrategyRunRequest(
+                symbols=config.symbols,
+                period=config.period,
+                timeframes=config.timeframes,
+                limit=240,
+                conflict_threshold=0.15,
+                strategies=config.strategies,
+                max_positions=config.max_positions,
+            )
+            strategy_result = await self.run_strategies(run_request)
+            account = self.paper_broker.get_account_info()
+            positions = self.paper_broker.get_positions()
+            decisions = self.auto_trading_engine.build_order_decisions(
+                strategy_result.model_dump(),
+                account,
+                positions,
+                place_orders=place_orders,
+            )
+            for decision in decisions:
+                if decision.get("status") != "ready":
+                    continue
+                order = self.paper_broker.place_order(
+                    symbol=decision["symbol"],
+                    action=decision["action"],
+                    quantity=float(decision["quantity"]),
+                    price=float(decision["price"]),
+                    strategy=f"auto:{decision['strategy_id']}",
+                    order_type="LIMIT",
+                )
+                self.auto_trading_engine.record_order_result(decision, order.to_response())
+            return AutoTradingStatusResponse(**self.auto_trading_engine.status())
+        except Exception as exc:
+            self.auto_trading_engine.record_error(str(exc), {"type": exc.__class__.__name__})
+            return AutoTradingStatusResponse(**self.auto_trading_engine.status())
+
+    async def get_auto_trading_logs(self, limit: int = 100) -> AutoTradingLogsResponse:
+        logs = self.auto_trading_engine.get_logs(limit)
+        return AutoTradingLogsResponse(items=logs, count=len(logs))
+
     async def place_shadow_order(self, request: CryptoShadowOrderRequest) -> CryptoShadowTradeResponse:
         record = self.shadow_engine.execute_shadow_trade(
             symbol=request.symbol,
@@ -382,6 +468,177 @@ class CryptoService:
             limit=request.limit,
         )
         return PortfolioReturnsResponse(**analytics.to_dict())
+
+    async def analyze_ai_signal(self, request: AiSignalAnalyzeRequest) -> AiSignalAnalyzeResponse:
+        """Run one manual AI advisory analysis and persist the signal."""
+        symbol = normalize_crypto_symbol(request.symbol, self.crypto_config.get("default_quote_currency", "USDT"))
+        limit = min(int(request.limit or 120), self.ai_config.max_context_candles)
+        try:
+            quote_response = await self.get_quotes([symbol])
+            kline_response = await self.get_klines(symbol=symbol, period=request.period, limit=limit)
+            account = self.paper_broker.get_account_info()
+            positions = self.paper_broker.get_positions()
+            recent_orders = self.paper_broker.get_orders(limit=20, offset=0)["items"]
+            macro = {}
+            try:
+                macro = (await self.get_macro_overview()).model_dump()
+            except Exception:
+                macro = {}
+            quote = quote_response.items[0].model_dump() if quote_response.items else {"symbol": symbol, "price": 0}
+            context = AiSignalContextBuilder.build(
+                symbol=symbol,
+                period=request.period,
+                quote=quote,
+                klines=[item.model_dump() for item in kline_response.items],
+                account=account,
+                positions=positions,
+                recent_orders=recent_orders,
+                risk_config=self.config.get("risk", {}) or {},
+                ai_config=self.ai_config,
+                macro=macro,
+            )
+            advice = self.ai_advisor.analyze(context)
+        except ApiError:
+            raise
+        except ValueError as exc:
+            failed = self.ai_store.save_signal(
+                symbol=symbol,
+                period=request.period,
+                model=self.ai_config.model,
+                request_summary={"symbol": symbol, "period": request.period, "error": "invalid_model_output"},
+                response={
+                    "symbol": symbol,
+                    "action": "HOLD",
+                    "confidence": 0.0,
+                    "suggested_notional_usdt": 0.0,
+                    "max_loss_usdt": 0.0,
+                    "time_horizon": "",
+                    "reason": f"Invalid AI response: {exc}",
+                    "risk_notes": ["AI output did not pass local schema validation"],
+                    "invalid_if": ["Model output is invalid"],
+                },
+                approval_status="failed",
+                approval_reason=str(exc),
+            )
+            return AiSignalAnalyzeResponse(signal=self._ai_record_response(failed), context_summary=failed["request_summary"])
+        except Exception as exc:
+            raise ApiError(
+                503,
+                f"AI provider unavailable: {exc}",
+                ErrorCode.AI_PROVIDER_UNAVAILABLE,
+            ) from exc
+
+        approval = self._assess_ai_advice(advice, account, positions)
+        context_summary = AiSignalContextBuilder.summarize(context)
+        record = self.ai_store.save_signal(
+            symbol=symbol,
+            period=request.period,
+            model=str(advice.get("model") or self.ai_config.model),
+            request_summary=context_summary,
+            response=advice,
+            approval_status=approval["approval_status"],
+            approval_reason=approval["approval_reason"],
+            approved_notional_usdt=approval["approved_notional_usdt"],
+        )
+        return AiSignalAnalyzeResponse(signal=self._ai_record_response(record), context_summary=context_summary)
+
+    async def list_ai_signals(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        symbol: str | None = None,
+    ) -> AiSignalListResponse:
+        page = self.ai_store.list_signals(limit=limit, offset=offset, symbol=symbol)
+        return AiSignalListResponse(
+            items=[self._ai_record_response(item) for item in page["items"]],
+            count=page["count"],
+            total=page["total"],
+            limit=page["limit"],
+            offset=page["offset"],
+        )
+
+    async def get_ai_signal(self, signal_id: str) -> AiSignalRecordResponse:
+        record = self.ai_store.get_signal(signal_id)
+        if not record:
+            raise ApiError(404, "AI signal not found", ErrorCode.AI_SIGNAL_NOT_FOUND)
+        return self._ai_record_response(record)
+
+    async def create_ai_signal_paper_order(self, signal_id: str) -> AiSignalPaperOrderResponse:
+        record = self.ai_store.get_signal(signal_id)
+        if not record:
+            raise ApiError(404, "AI signal not found", ErrorCode.AI_SIGNAL_NOT_FOUND)
+
+        advice = validate_ai_advice(record.get("response", {}), expected_symbol=record.get("symbol", ""))
+        account = self.paper_broker.get_account_info()
+        positions = self.paper_broker.get_positions()
+        approval = self._assess_ai_advice(advice, account, positions)
+        if approval["approval_status"] != "approved":
+            updated = self.ai_store.update_approval(
+                signal_id,
+                approval_status="rejected",
+                approval_reason=approval["approval_reason"],
+                approved_notional_usdt=approval["approved_notional_usdt"],
+            ) or record
+            return AiSignalPaperOrderResponse(
+                success=False,
+                message=approval["approval_reason"],
+                signal=self._ai_record_response(updated),
+                order=None,
+            )
+
+        try:
+            quote_response = await self.get_quotes([advice["symbol"]])
+            price = float(quote_response.items[0].price if quote_response.items else 0)
+        except Exception:
+            price = float((record.get("request_summary", {}).get("quote") or {}).get("price", 0) or 0)
+        if price <= 0:
+            updated = self.ai_store.update_approval(
+                signal_id,
+                approval_status="rejected",
+                approval_reason="missing executable price",
+                approved_notional_usdt=0,
+            ) or record
+            return AiSignalPaperOrderResponse(success=False, message="missing executable price", signal=self._ai_record_response(updated))
+
+        action = advice["action"]
+        notional = float(approval["approved_notional_usdt"] or 0)
+        if action == "BUY":
+            quantity = round(notional / price, 8)
+        else:
+            held = self._position_quantity(advice["symbol"], positions)
+            quantity = round(min(held, notional / price), 8)
+        if quantity <= 0:
+            updated = self.ai_store.update_approval(
+                signal_id,
+                approval_status="rejected",
+                approval_reason="AI signal produced zero executable quantity",
+                approved_notional_usdt=notional,
+            ) or record
+            return AiSignalPaperOrderResponse(success=False, message="AI signal produced zero executable quantity", signal=self._ai_record_response(updated))
+
+        order = self.paper_broker.place_order(
+            symbol=advice["symbol"],
+            action=action,
+            quantity=quantity,
+            price=price,
+            strategy=f"ai:{signal_id[:24]}",
+            order_type="LIMIT",
+        )
+        order_response = CryptoPaperOrderResponse(**order.to_response())
+        status = "ordered" if order.status in {"filled", "partial_filled", "pending"} else "rejected"
+        updated = self.ai_store.update_approval(
+            signal_id,
+            approval_status=status,
+            approval_reason=order.message,
+            approved_notional_usdt=round(quantity * price, 8),
+            linked_order_id=order.order_id,
+        ) or record
+        return AiSignalPaperOrderResponse(
+            success=status == "ordered",
+            message=order.message,
+            signal=self._ai_record_response(updated),
+            order=order_response,
+        )
 
     async def get_testnet_status(self) -> BinanceTestnetStatusResponse:
         return BinanceTestnetStatusResponse(**self.testnet_executor.status())
@@ -616,6 +873,84 @@ class CryptoService:
         except Exception:
             cached = self.market_cache.get_quotes(normalized)
             return {row["symbol"]: float(row.get("price", 0) or 0) for row in cached}
+
+    def _assess_ai_advice(
+        self,
+        advice: dict[str, Any],
+        account: dict[str, Any],
+        positions: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        action = str(advice.get("action") or "HOLD").upper()
+        confidence = float(advice.get("confidence", 0) or 0)
+        symbol = normalize_crypto_symbol(advice.get("symbol") or "")
+        risk_config = self.config.get("risk", {}) or {}
+        trading_config = self.config.get("trading", {}) or {}
+        crypto_config = self.config.get("crypto", {}) or {}
+        paper_config = crypto_config.get("paper", {}) or {}
+
+        blocked_flags = [
+            bool(account.get("real_trading_enabled", False)),
+            bool(risk_config.get("real_trading_enabled", False)),
+            bool(trading_config.get("real_trading_enabled", False)),
+            bool(paper_config.get("real_trading_enabled", False)),
+            bool((crypto_config.get("testnet", {}) or {}).get("real_trading_enabled", False)),
+            bool((crypto_config.get("mainnet", {}) or {}).get("real_trading_enabled", False)),
+        ]
+        if any(blocked_flags):
+            return self._ai_approval("blocked", "real trading is disabled for AI signals", 0)
+        if action == "HOLD":
+            return self._ai_approval("blocked", "HOLD signal cannot generate an order", 0)
+        if action not in {"BUY", "SELL"}:
+            return self._ai_approval("blocked", "unsupported AI action", 0)
+        if confidence < self.ai_config.min_confidence_for_order:
+            return self._ai_approval(
+                "blocked",
+                f"confidence below threshold {self.ai_config.min_confidence_for_order:.2f}",
+                0,
+            )
+        if risk_config.get("allow_leverage", False):
+            return self._ai_approval("blocked", "AI orders require leverage disabled", 0)
+        if action == "SELL" and risk_config.get("allow_short_selling", False):
+            return self._ai_approval("blocked", "AI orders require short selling disabled", 0)
+
+        suggested = float(advice.get("suggested_notional_usdt", 0) or 0)
+        max_order = min(
+            suggested,
+            float(self.ai_config.max_order_notional or 0),
+            float(risk_config.get("max_order_notional", self.ai_config.max_order_notional) or self.ai_config.max_order_notional),
+            float(paper_config.get("max_order_notional", self.ai_config.max_order_notional) or self.ai_config.max_order_notional),
+        )
+        if max_order <= 0:
+            return self._ai_approval("blocked", "AI suggested notional is zero", 0)
+
+        if action == "BUY":
+            available_cash = float(account.get("available_cash") or account.get("cash") or 0)
+            approved = min(max_order, available_cash)
+            if approved <= 0:
+                return self._ai_approval("blocked", "insufficient USDT cash", 0)
+            return self._ai_approval("approved", f"approved for manual paper BUY up to {approved:.2f} USDT", approved)
+
+        quantity = self._position_quantity(symbol, positions)
+        if quantity <= 0:
+            return self._ai_approval("blocked", "no position to sell; short selling disabled", 0)
+        return self._ai_approval("approved", f"approved for manual paper SELL up to {max_order:.2f} USDT", max_order)
+
+    def _ai_approval(self, status: str, reason: str, notional: float) -> dict[str, Any]:
+        return {
+            "approval_status": status,
+            "approval_reason": reason,
+            "approved_notional_usdt": round(float(notional or 0), 8),
+        }
+
+    def _position_quantity(self, symbol: str, positions: list[dict[str, Any]]) -> float:
+        normalized = normalize_crypto_symbol(symbol)
+        for position in positions or []:
+            if normalize_crypto_symbol(position.get("symbol")) == normalized:
+                return float(position.get("available", position.get("quantity", 0)) or 0)
+        return 0.0
+
+    def _ai_record_response(self, record: dict[str, Any]) -> AiSignalRecordResponse:
+        return AiSignalRecordResponse(**record)
 
     async def get_connection_health(self) -> ConnectionHealthResponse:
         return ConnectionHealthResponse(**self.provider.get_connection_health())

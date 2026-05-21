@@ -5,6 +5,8 @@ from fastapi import APIRouter, Depends, Query
 from api.dependencies import get_crypto_service
 from api.error_codes import ApiError, ErrorCode
 from api.models.request import (
+    AiSignalAnalyzeRequest,
+    AutoTradingConfigRequest,
     BinanceTestnetCredentialsRequest,
     BinanceTestnetEnableRequest,
     BinanceTestnetOrderRequest,
@@ -16,6 +18,12 @@ from api.models.request import (
     PortfolioReturnsRequest,
 )
 from api.models.response import (
+    AiSignalAnalyzeResponse,
+    AiSignalListResponse,
+    AiSignalPaperOrderResponse,
+    AiSignalRecordResponse,
+    AutoTradingStatusResponse,
+    AutoTradingLogsResponse,
     BinanceTestnetActionResponse,
     BinanceTestnetOrderResponse,
     BinanceTestnetStatusResponse,
@@ -163,6 +171,57 @@ async def get_crypto_paper_logs(
     service: CryptoService = Depends(get_crypto_service),
 ) -> CryptoPaperLogsResponse:
     return await service.get_paper_logs(limit=limit)
+
+
+@router.get("/auto/status", response_model=AutoTradingStatusResponse, summary="Get paper auto-trading status")
+async def get_crypto_auto_trading_status(
+    service: CryptoService = Depends(get_crypto_service),
+) -> AutoTradingStatusResponse:
+    return await service.get_auto_trading_status()
+
+
+@router.put("/auto/config", response_model=AutoTradingStatusResponse, summary="Update paper auto-trading config")
+async def update_crypto_auto_trading_config(
+    request: AutoTradingConfigRequest,
+    service: CryptoService = Depends(get_crypto_service),
+) -> AutoTradingStatusResponse:
+    return await service.update_auto_trading_config(request)
+
+
+@router.post("/auto/start", response_model=AutoTradingStatusResponse, summary="Start paper auto-trading")
+async def start_crypto_auto_trading(
+    service: CryptoService = Depends(get_crypto_service),
+) -> AutoTradingStatusResponse:
+    return await service.start_auto_trading()
+
+
+@router.post("/auto/pause", response_model=AutoTradingStatusResponse, summary="Pause paper auto-trading")
+async def pause_crypto_auto_trading(
+    service: CryptoService = Depends(get_crypto_service),
+) -> AutoTradingStatusResponse:
+    return await service.pause_auto_trading()
+
+
+@router.post("/auto/stop", response_model=AutoTradingStatusResponse, summary="Stop paper auto-trading")
+async def stop_crypto_auto_trading(
+    service: CryptoService = Depends(get_crypto_service),
+) -> AutoTradingStatusResponse:
+    return await service.stop_auto_trading()
+
+
+@router.post("/auto/scan", response_model=AutoTradingStatusResponse, summary="Run one paper auto-trading scan")
+async def scan_crypto_auto_trading(
+    service: CryptoService = Depends(get_crypto_service),
+) -> AutoTradingStatusResponse:
+    return await service.run_auto_trading_cycle()
+
+
+@router.get("/auto/logs", response_model=AutoTradingLogsResponse, summary="Get paper auto-trading logs")
+async def get_crypto_auto_trading_logs(
+    limit: int = Query(default=100, ge=1, le=500),
+    service: CryptoService = Depends(get_crypto_service),
+) -> AutoTradingLogsResponse:
+    return await service.get_auto_trading_logs(limit=limit)
 
 
 @router.post("/shadow/orders", response_model=CryptoShadowTradeResponse, summary="Execute shadow trade")

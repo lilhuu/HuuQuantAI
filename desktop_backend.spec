@@ -22,6 +22,7 @@ for package in [
     "uvicorn.protocols.websockets",
     "websockets",
     "ccxt",
+    "openai",
 ]:
     try:
         hiddenimports += collect_submodules(package)

@@ -23,6 +23,9 @@ class ErrorCode:
     RISK_REJECTED = "risk.rejected"
     STRATEGY_NOT_FOUND = "strategy.not_found"
     STRATEGY_CONFIG_INVALID = "strategy.config_invalid"
+    AI_PROVIDER_UNAVAILABLE = "ai.provider_unavailable"
+    AI_SIGNAL_NOT_FOUND = "ai.signal_not_found"
+    AI_SIGNAL_REJECTED = "ai.signal_rejected"
     INTERNAL_SERVER_ERROR = "server.internal_error"
 
 

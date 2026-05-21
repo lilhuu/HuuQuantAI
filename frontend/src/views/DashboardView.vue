@@ -1,9 +1,11 @@
 <script setup>
 import { computed, onMounted } from "vue";
 
+import { useAutoTradingStore } from "../stores/autoTrading";
 import { useTradingStore } from "../stores/trading";
 
 const store = useTradingStore();
+const autoStore = useAutoTradingStore();
 
 const latestQuote = computed(() => {
   const symbol = store.selectedCryptoSymbol;
@@ -16,7 +18,7 @@ const accountCards = computed(() => [
   { label: "账户权益", value: `${Number(store.liveAccountValue || 0).toFixed(2)} USDT` },
   { label: "可用余额", value: `${Number(store.liveCash || 0).toFixed(2)} USDT` },
   { label: "持仓数量", value: String(store.cryptoPositions?.length || 0) },
-  { label: "今日盈亏", value: `${Number((store.liveAccountValue || 0) - (store.cryptoAccount?.initial_cash || 0)).toFixed(2)} USDT` },
+  { label: "累计盈亏", value: `${Number((store.liveAccountValue || 0) - (store.cryptoAccount?.initial_cash || 0)).toFixed(2)} USDT` },
 ]);
 
 const chartPeriod = computed(() => store.selectedCryptoPeriod || "15m");
@@ -50,6 +52,7 @@ async function loadPeriod(period) {
 }
 
 async function scanNow() {
+  await autoStore.scan();
   await Promise.allSettled([
     store.fetchCryptoQuotes(store.cryptoWatchSymbols),
     store.fetchCryptoKlines({
@@ -62,7 +65,10 @@ async function scanNow() {
   ]);
 }
 
-onMounted(() => {
+onMounted(async () => {
+  if (!autoStore.status) {
+    autoStore.fetchStatus().catch(() => {});
+  }
   if (!candles.value.length) {
     store.fetchCryptoKlines({
       symbol: store.selectedCryptoSymbol,
@@ -93,7 +99,7 @@ onMounted(() => {
           <h2>运行控制</h2>
           <p>启动、停止或立即触发一轮自动交易扫描。</p>
         </div>
-        <span class="cq-pill">stopped</span>
+        <span class="cq-pill">{{ autoStore.stateLabel }}</span>
       </div>
 
       <div class="cq-health-grid">
@@ -102,29 +108,29 @@ onMounted(() => {
           <strong>{{ store.marketSocketState === "connected" ? "已连接" : "未检查" }}</strong>
         </div>
         <div>
-          <span>Binance 私有账户</span>
-          <strong>未启用</strong>
+          <span>真实交易</span>
+          <strong>永久关闭</strong>
         </div>
         <div>
-          <span>代理链路</span>
-          <strong>未配置</strong>
+          <span>自动模式</span>
+          <strong>{{ autoStore.enabled ? "模拟运行中" : "未启动" }}</strong>
         </div>
       </div>
 
       <div class="cq-control-row">
-        <button class="cq-primary-button" @click="store.connectRealtimeStreams">启动</button>
-        <button class="cq-muted-button" @click="store.disconnectRealtimeStreams">停止</button>
+        <button class="cq-primary-button" @click="autoStore.start()">启动</button>
+        <button class="cq-muted-button" @click="autoStore.stop()">停止</button>
         <button class="cq-accent-button" @click="scanNow">立即扫描</button>
       </div>
 
       <div class="cq-card-grid cq-card-grid--three">
         <article class="cq-metric-card cq-metric-card--compact">
-          <span>影子模式</span>
-          <strong>关闭</strong>
+          <span>自助交易</span>
+          <strong>{{ autoStore.stateLabel }}</strong>
         </article>
         <article class="cq-metric-card cq-metric-card--compact">
-          <span>触发阈值</span>
-          <strong>0%</strong>
+          <span>信心阈值</span>
+          <strong>{{ Number(autoStore.configDraft.confidence_threshold || 0).toFixed(2) }}</strong>
         </article>
         <article class="cq-metric-card cq-metric-card--compact">
           <span>最近周期</span>
@@ -133,8 +139,13 @@ onMounted(() => {
       </div>
 
       <section class="cq-log-box">
-        <strong>AI 代理活动日志</strong>
-        <div v-if="recentOrders.length" class="cq-log-list">
+        <strong>自动交易活动日志</strong>
+        <div v-if="autoStore.logs.length" class="cq-log-list">
+          <p v-for="log in autoStore.logs.slice(-5)" :key="`${log.timestamp}-${log.event}`">
+            {{ log.event }} · {{ log.message }}
+          </p>
+        </div>
+        <div v-else-if="recentOrders.length" class="cq-log-list">
           <p v-for="order in recentOrders" :key="order.order_id">
             {{ order.symbol }} {{ order.action }} · {{ order.status }} · {{ order.quantity }}
           </p>
