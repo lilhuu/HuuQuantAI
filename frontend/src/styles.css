@@ -2319,6 +2319,126 @@ body,
   background: rgba(72, 18, 26, 0.48);
 }
 
+.cq-ai-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.cq-ai-form label {
+  display: grid;
+  gap: 8px;
+  color: #b7b7c4;
+  font-weight: 700;
+}
+
+.cq-ai-form input,
+.cq-ai-form select {
+  min-height: 48px;
+  border: 1px solid #303039;
+  border-radius: 14px;
+  background: #09090c;
+  color: #f4f4f6;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.cq-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.cq-inline-error {
+  margin: 16px 0 0;
+  color: #ff7b7b;
+  font-weight: 700;
+}
+
+.cq-ai-signal {
+  margin-top: 24px;
+}
+
+.cq-ai-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid #25252e;
+  border-radius: 18px;
+  background: #09090c;
+}
+
+.cq-ai-action strong {
+  display: block;
+  font-size: 40px;
+  line-height: 1;
+}
+
+.cq-ai-action span {
+  color: #a8a8b4;
+  font-weight: 800;
+}
+
+.cq-ai-notes {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.cq-ai-notes h3 {
+  margin: 8px 0 0;
+  color: #f4f4f6;
+  font-size: 16px;
+}
+
+.cq-ai-notes p,
+.cq-ai-notes ul {
+  margin: 0;
+  color: #d6d6df;
+}
+
+.cq-ai-notes ul {
+  padding-left: 20px;
+}
+
+.cq-ai-history {
+  margin-top: 30px;
+}
+
+.cq-table {
+  width: 100%;
+  margin-top: 20px;
+  border-collapse: collapse;
+  overflow: hidden;
+}
+
+.cq-table th,
+.cq-table td {
+  padding: 14px 12px;
+  border-bottom: 1px solid #25252e;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.cq-table th {
+  color: #a8a8b4;
+  font-size: 13px;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.cq-table tbody tr {
+  cursor: pointer;
+}
+
+.cq-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
 @media (max-width: 1180px) {
   .cq-shell,
   .cq-dashboard-grid {
@@ -2349,6 +2469,15 @@ body,
   .cq-card-grid--three,
   .cq-health-grid {
     grid-template-columns: 1fr;
+  }
+
+  .cq-ai-form {
+    grid-template-columns: 1fr;
+  }
+
+  .cq-ai-action {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .cq-content,
