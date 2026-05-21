@@ -143,7 +143,7 @@ def test_binance_testnet_executor_credentials_gate_and_dry_run(tmp_path):
     assert mainnet_blocked.place_order(symbol="BTC/USDT", action="BUY", quantity=0.001, price=1000).status == "rejected"
 
 
-def test_crypto_api_and_removed_stock_routes(monkeypatch, tmp_path):
+def test_crypto_api_and_removed_legacy_routes(monkeypatch, tmp_path):
     def fake_quotes(self, symbols):
       return [
           {

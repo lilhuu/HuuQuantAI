@@ -703,7 +703,7 @@ class TradeNotifier:
     def send_trade_alert(self, subject: str, body: str):
         """发送交易告警邮件"""
         msg = MIMEMultipart()
-        msg["Subject"] = f"[AutoTrader] {subject}"
+        msg["Subject"] = f"[HuuQuantAI] {subject}"
         msg["From"] = self.smtp_config.get("user")
         msg["To"] = self.smtp_config.get("recipient")
         msg.attach(MIMEText(body, "html"))

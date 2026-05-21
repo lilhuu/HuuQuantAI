@@ -129,7 +129,7 @@ watch(
         </div>
         <div>
           <strong>HuuQuantAI</strong>
-          <span>源码控制台</span>
+          <span>量化控制台</span>
         </div>
       </div>
 
@@ -147,10 +147,10 @@ watch(
       </nav>
 
       <div class="cq-sidebar-card">
-        <strong>回退入口</strong>
-        <button class="cq-outline-button cq-legacy-button" @click="router.push('/market')">
+        <strong>系统状态</strong>
+        <button class="cq-outline-button cq-legacy-button" @click="refreshWorkspace">
           <span class="cq-lock-icon" aria-hidden="true"></span>
-          打开 Legacy 版本
+          刷新工作台
         </button>
       </div>
     </aside>

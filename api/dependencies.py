@@ -26,7 +26,7 @@ from core.desktop_paths import (
 
 DEFAULT_API_SETTINGS: Dict[str, Any] = {
     "app": {
-        "title": "Auto Trader API",
+        "title": "HuuQuantAI API",
         "version": "0.1.0",
         "docs_url": "/docs",
         "redoc_url": "/redoc",

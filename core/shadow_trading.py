@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 
@@ -98,11 +101,22 @@ class ShadowPosition:
 class ShadowTradingEngine:
     """Track simulated shadow positions without sending real orders."""
 
-    def __init__(self, market_data_provider: Any, impact_calculator: OrderbookImpactCalculator | None = None):
+    def __init__(
+        self,
+        market_data_provider: Any,
+        impact_calculator: OrderbookImpactCalculator | None = None,
+        storage_path: str | None = None,
+        max_trade_log: int = 1000,
+    ):
         self.provider = market_data_provider
         self.impact = impact_calculator or OrderbookImpactCalculator()
         self.shadow_positions: dict[str, ShadowPosition] = {}
         self.trade_log: list[dict[str, Any]] = []
+        self.max_trade_log = max(1, int(max_trade_log or 1000))
+        self.storage_path = self._resolve_storage_path(storage_path) if storage_path else None
+        if self.storage_path:
+            self._setup_storage()
+            self._load_state()
 
     def execute_shadow_trade(
         self,
@@ -127,7 +141,7 @@ class ShadowTradingEngine:
             fill = FillResult(float(quantity or 0), slipped, float(quantity or 0) * slipped, 0.05, 0, 0.0, [])
 
         if action == "BUY" and fill.filled_quantity > 0:
-            self.shadow_positions[symbol] = ShadowPosition(
+            position = ShadowPosition(
                 symbol=symbol,
                 quantity=fill.filled_quantity,
                 avg_price=fill.average_price,
@@ -137,8 +151,11 @@ class ShadowTradingEngine:
                 signal_source=strategy_id,
                 estimated_slippage_pct=fill.slippage_pct,
             )
+            self.shadow_positions[symbol] = position
+            self._persist_position(position)
         elif action == "SELL":
             self.shadow_positions.pop(symbol, None)
+            self._delete_position(symbol)
 
         record = {
             "timestamp": self._now(),
@@ -153,6 +170,8 @@ class ShadowTradingEngine:
             "orderbook_available": bool(order_book),
         }
         self.trade_log.append(record)
+        self.trade_log = self.trade_log[-self.max_trade_log :]
+        self._persist_trade_log(record, fill.details)
         return record
 
     def get_positions(self) -> list[dict[str, Any]]:
@@ -169,3 +188,160 @@ class ShadowTradingEngine:
 
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    def _resolve_storage_path(self, storage_path: str) -> str:
+        path = Path(str(storage_path))
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return str(path.resolve())
+
+    def _connect(self) -> sqlite3.Connection:
+        if not self.storage_path:
+            raise RuntimeError("shadow trading storage is not configured")
+        conn = sqlite3.connect(self.storage_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _setup_storage(self) -> None:
+        with self._connect() as conn:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS shadow_positions (
+                    symbol TEXT PRIMARY KEY,
+                    quantity REAL NOT NULL,
+                    avg_price REAL NOT NULL,
+                    stop_loss_price REAL,
+                    take_profit_price REAL,
+                    created_at TEXT NOT NULL,
+                    signal_source TEXT DEFAULT '',
+                    estimated_slippage_pct REAL DEFAULT 0
+                );
+                CREATE TABLE IF NOT EXISTS shadow_trade_logs (
+                    log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    quantity REAL DEFAULT 0,
+                    price REAL DEFAULT 0,
+                    slippage_pct REAL DEFAULT 0,
+                    levels_consumed INTEGER DEFAULT 0,
+                    remaining_quantity REAL DEFAULT 0,
+                    strategy_id TEXT DEFAULT '',
+                    orderbook_available INTEGER DEFAULT 0,
+                    details_json TEXT DEFAULT '[]'
+                );
+                CREATE INDEX IF NOT EXISTS idx_shadow_trade_logs_symbol_time
+                    ON shadow_trade_logs(symbol, timestamp DESC);
+                """
+            )
+
+    def _load_state(self) -> None:
+        with self._connect() as conn:
+            position_rows = conn.execute(
+                """
+                SELECT symbol, quantity, avg_price, stop_loss_price, take_profit_price,
+                       created_at, signal_source, estimated_slippage_pct
+                FROM shadow_positions
+                ORDER BY created_at ASC
+                """
+            ).fetchall()
+            log_rows = conn.execute(
+                """
+                SELECT timestamp, symbol, action, quantity, price, slippage_pct, levels_consumed,
+                       remaining_quantity, strategy_id, orderbook_available
+                FROM shadow_trade_logs
+                ORDER BY log_id DESC
+                LIMIT ?
+                """,
+                (self.max_trade_log,),
+            ).fetchall()
+
+        self.shadow_positions = {
+            row["symbol"]: ShadowPosition(
+                symbol=row["symbol"],
+                quantity=float(row["quantity"] or 0),
+                avg_price=float(row["avg_price"] or 0),
+                stop_loss_price=self._optional_float(row["stop_loss_price"]),
+                take_profit_price=self._optional_float(row["take_profit_price"]),
+                created_at=str(row["created_at"] or ""),
+                signal_source=str(row["signal_source"] or ""),
+                estimated_slippage_pct=float(row["estimated_slippage_pct"] or 0),
+            )
+            for row in position_rows
+        }
+        self.trade_log = [
+            {
+                "timestamp": str(row["timestamp"] or ""),
+                "symbol": str(row["symbol"] or ""),
+                "action": str(row["action"] or ""),
+                "quantity": float(row["quantity"] or 0),
+                "price": float(row["price"] or 0),
+                "slippage_pct": float(row["slippage_pct"] or 0),
+                "levels_consumed": int(row["levels_consumed"] or 0),
+                "remaining_quantity": float(row["remaining_quantity"] or 0),
+                "strategy_id": str(row["strategy_id"] or ""),
+                "orderbook_available": bool(row["orderbook_available"]),
+            }
+            for row in reversed(log_rows)
+        ]
+
+    def _persist_position(self, position: ShadowPosition) -> None:
+        if not self.storage_path:
+            return
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO shadow_positions
+                    (symbol, quantity, avg_price, stop_loss_price, take_profit_price,
+                     created_at, signal_source, estimated_slippage_pct)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    position.symbol,
+                    position.quantity,
+                    position.avg_price,
+                    position.stop_loss_price,
+                    position.take_profit_price,
+                    position.created_at,
+                    position.signal_source,
+                    position.estimated_slippage_pct,
+                ),
+            )
+
+    def _delete_position(self, symbol: str) -> None:
+        if not self.storage_path:
+            return
+        with self._connect() as conn:
+            conn.execute("DELETE FROM shadow_positions WHERE symbol = ?", (symbol,))
+
+    def _persist_trade_log(self, record: dict[str, Any], details: list[dict[str, Any]]) -> None:
+        if not self.storage_path:
+            return
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO shadow_trade_logs
+                    (timestamp, symbol, action, quantity, price, slippage_pct, levels_consumed,
+                     remaining_quantity, strategy_id, orderbook_available, details_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(record.get("timestamp", "")),
+                    str(record.get("symbol", "")),
+                    str(record.get("action", "")),
+                    float(record.get("quantity", 0) or 0),
+                    float(record.get("price", 0) or 0),
+                    float(record.get("slippage_pct", 0) or 0),
+                    int(record.get("levels_consumed", 0) or 0),
+                    float(record.get("remaining_quantity", 0) or 0),
+                    str(record.get("strategy_id", "")),
+                    1 if record.get("orderbook_available") else 0,
+                    json.dumps(details or [], ensure_ascii=False),
+                ),
+            )
+
+    def _optional_float(self, value: Any) -> float | None:
+        if value is None:
+            return None
+        return float(value)

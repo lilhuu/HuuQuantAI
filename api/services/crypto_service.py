@@ -59,6 +59,7 @@ from api.models.response import (
     WalkForwardConfigResponse,
 )
 from core.binance_testnet_executor import BinanceTestnetExecutor
+from core.audit_trail import AuditLogger, AuditSQLiteStore
 from core.crypto_market_cache import CryptoMarketCache
 from core.crypto_market_data_provider import CryptoMarketDataProvider, normalize_crypto_symbol
 from core.crypto_paper_broker import CryptoPaperBrokerExecutor
@@ -91,16 +92,21 @@ class CryptoService:
         }
         self.provider = CryptoMarketDataProvider(provider_config)
         storage_config = self.config.get("storage", {}) or {}
+        sqlite_storage_path = storage_config.get("db_path") or "data/trading.db"
         self.market_cache = CryptoMarketCache(
-            storage_config.get("crypto_market_db_path") or storage_config.get("db_path") or "data/trading.db"
+            storage_config.get("crypto_market_db_path") or sqlite_storage_path
         )
         paper_config = {
             "default_quote_currency": crypto_config.get("default_quote_currency", "USDT"),
-            "storage_path": storage_config.get("crypto_paper_db_path") or storage_config.get("db_path") or "data/trading.db",
+            "storage_path": storage_config.get("crypto_paper_db_path") or sqlite_storage_path,
             **(crypto_config.get("paper", {}) or {}),
         }
         self.paper_broker = CryptoPaperBrokerExecutor(paper_config)
-        self.shadow_engine = ShadowTradingEngine(self.provider)
+        self.audit_logger = AuditLogger(AuditSQLiteStore(storage_config.get("audit_db_path") or sqlite_storage_path))
+        self.shadow_engine = ShadowTradingEngine(
+            self.provider,
+            storage_path=storage_config.get("shadow_db_path") or sqlite_storage_path,
+        )
         testnet_config = dict(crypto_config.get("testnet", {}) or {})
         mainnet_config = dict(crypto_config.get("mainnet", {}) or {})
         testnet_config["mainnet_real_trading_enabled"] = bool(mainnet_config.get("real_trading_enabled", False))
@@ -429,6 +435,7 @@ class CryptoService:
             regime_scores=regime_scores,
             macro_gate=macro_gate,
             max_positions=request.max_positions,
+            audit_logger=self.audit_logger,
         )
 
     async def backtest_strategies(self, request: CryptoStrategyBacktestRequest) -> CryptoStrategyBacktestResponse:

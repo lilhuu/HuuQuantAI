@@ -61,3 +61,15 @@ def test_shadow_fallback_to_fixed_slippage():
 
     assert trade["orderbook_available"] is False
     assert trade["price"] == 100.05
+
+
+def test_shadow_state_persists_to_sqlite(tmp_path):
+    storage_path = tmp_path / "trading.db"
+    engine = ShadowTradingEngine(FakeProvider(), storage_path=str(storage_path))
+    engine.execute_shadow_trade("BTC/USDT", "BUY", 1, "unit", sl_price=90, tp_price=120)
+
+    restored = ShadowTradingEngine(FakeProvider(), storage_path=str(storage_path))
+
+    assert restored.get_positions()[0]["symbol"] == "BTC/USDT"
+    assert restored.get_positions()[0]["stop_loss_price"] == 90
+    assert restored.trade_log[-1]["strategy_id"] == "unit"

@@ -1,5 +1,5 @@
-﻿const TOKEN_KEY = "auto_trader_access_token";
-const USER_KEY = "auto_trader_user";
+const TOKEN_KEY = "huu_quant_ai_access_token";
+const USER_KEY = "huu_quant_ai_user";
 
 export function getStoredToken() {
   return window.localStorage.getItem(TOKEN_KEY) || "";

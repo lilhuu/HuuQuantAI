@@ -20,6 +20,7 @@ class HealthCheckResponse(BaseModel):
     api_version: str = Field(..., title="API version")
     trading_system_running: bool = Field(..., title="Trading enabled")
     data_feed_connected: bool = Field(..., title="Data feed available")
+    checks: dict[str, Any] = Field(default_factory=dict, title="Detailed checks")
 
 
 class AuthUserResponse(BaseModel):

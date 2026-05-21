@@ -201,6 +201,7 @@ class CryptoStrategyEngine:
         regime_scores: dict[str, float] | None = None,
         macro_gate: MacroGateDecision | None = None,
         max_positions: int = 2,
+        audit_logger: Any | None = None,
     ) -> dict[str, Any]:
         """Run strategies on multiple timeframes and resolve conflicts."""
         from core.audit_trail import AuditLogger, AuditStage, AuditVerdict
@@ -210,7 +211,7 @@ class CryptoStrategyEngine:
 
         all_signals: list[StrategySignal] = []
         strategy_results: list[dict[str, Any]] = []
-        audit_logger = AuditLogger()
+        audit_logger = audit_logger or AuditLogger()
         audit_trails = []
         trail_by_key: dict[tuple[str, str, str], Any] = {}
 

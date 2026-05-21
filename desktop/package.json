@@ -1,8 +1,8 @@
 {
-  "name": "auto-trader-desktop",
+  "name": "huuquantai-desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "HUU Auto Trade Console desktop shell",
+  "description": "HuuQuantAI desktop shell",
   "main": "main.js",
   "scripts": {
     "dev": "electron .",
@@ -13,8 +13,8 @@
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.huu.autotrader",
-    "productName": "HUU Auto Trade Console",
+    "appId": "com.huu.quantai",
+    "productName": "HuuQuantAI",
     "asar": true,
     "electronDist": "node_modules/electron/dist",
     "electronVersion": "31.7.7",

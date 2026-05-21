@@ -1579,7 +1579,7 @@ th {
   color: var(--text);
 }
 
-/* Stock mode placeholder */
+/* Empty market-state placeholder */
 .market-placeholder {
   display: flex;
   flex-direction: column;

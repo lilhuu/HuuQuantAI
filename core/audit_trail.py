@@ -137,6 +137,20 @@ class AuditSQLiteStore:
             ).fetchall()
         return [self._from_json(row["trail_json"]) for row in rows]
 
+    def get_by_symbol(self, symbol: str, limit: int = 100) -> list[AuditTrail]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT trail_json
+                FROM audit_trails
+                WHERE symbol = ?
+                ORDER BY trigger_time DESC
+                LIMIT ?
+                """,
+                (str(symbol or ""), max(1, int(limit or 100))),
+            ).fetchall()
+        return [self._from_json(row["trail_json"]) for row in rows]
+
     def _setup(self) -> None:
         with self._connect() as conn:
             conn.executescript(

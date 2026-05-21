@@ -1,5 +1,5 @@
 app:
-  title: "HUU Crypto Quant API"
+  title: "HuuQuantAI API"
   version: "0.2.0"
   description: "Crypto-only quantitative trading API with Binance public data and local paper trading."
   docs_url: "/docs"

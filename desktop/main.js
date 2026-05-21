@@ -29,7 +29,7 @@ app.on("second-instance", () => {
 });
 
 function getUserDataDir() {
-  return path.join(app.getPath("appData"), "AutoTrader");
+  return path.join(app.getPath("appData"), "HuuQuantAI");
 }
 
 function ensureDir(dirPath) {

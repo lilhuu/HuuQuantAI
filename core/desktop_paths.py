@@ -9,7 +9,7 @@ import sys
 from typing import Any, Dict
 
 
-APP_NAME = "AutoTrader"
+APP_NAME = "HuuQuantAI"
 
 
 def is_desktop_mode() -> bool:
@@ -40,7 +40,8 @@ def app_data_dir() -> Path:
     if explicit:
         base = Path(explicit)
     elif os.name == "nt":
-        base = Path(os.getenv("APPDATA", str(Path.home() / "AppData" / "Roaming"))) / APP_NAME
+        appdata_root = Path(os.getenv("APPDATA", str(Path.home() / "AppData" / "Roaming")))
+        base = appdata_root / APP_NAME
     else:
         base = Path(os.getenv("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / APP_NAME
     base.mkdir(parents=True, exist_ok=True)

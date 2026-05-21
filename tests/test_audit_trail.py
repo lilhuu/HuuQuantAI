@@ -45,3 +45,17 @@ def test_sqlite_store_persists(tmp_path):
     restored = AuditSQLiteStore(str(tmp_path / "audit.db")).get_recent(5)
     assert restored[0].trail_id == trail.trail_id
     assert restored[0].steps[0].stage == AuditStage.SIGNAL_GENERATION
+
+
+def test_sqlite_store_filters_by_symbol(tmp_path):
+    store = AuditSQLiteStore(str(tmp_path / "audit.db"))
+    logger = AuditLogger(store)
+    btc = logger.create_trail("BTC/USDT", "1h", "unit")
+    eth = logger.create_trail("ETH/USDT", "1h", "unit")
+    logger.finalize(btc, "EXECUTED", "ok")
+    logger.finalize(eth, "SKIPPED", "no signal")
+
+    restored = AuditSQLiteStore(str(tmp_path / "audit.db")).get_by_symbol("BTC/USDT", 5)
+
+    assert len(restored) == 1
+    assert restored[0].symbol == "BTC/USDT"

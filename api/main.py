@@ -3,7 +3,9 @@
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
+import sqlite3
 from time import perf_counter
+from typing import Any
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -13,7 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from api.dependencies import get_api_settings, get_current_user
+from api.dependencies import get_api_settings, get_crypto_service, get_current_user
 from api.error_codes import ErrorCode, default_error_code_for_status
 from api.models.response import HealthCheckResponse
 from api.routers import auth, crypto, crypto_ws
@@ -111,13 +113,100 @@ async def root():
     summary="Health check",
 )
 async def healthz() -> HealthCheckResponse:
+    service = get_crypto_service()
+    storage_check = _check_sqlite_storage(service)
+    trading_check = _check_trading_system(service)
+    data_check = _check_market_data(service)
+
+    storage_ok = bool(storage_check.get("ok"))
+    trading_ok = bool(trading_check.get("ok"))
+    data_ok = bool(data_check.get("ok"))
+    cache_available = bool(data_check.get("cache_available"))
+    if storage_ok and trading_ok and data_ok:
+        status = "ok"
+    elif storage_ok and trading_ok and cache_available:
+        status = "degraded"
+    else:
+        status = "error"
+
     return HealthCheckResponse(
-        status="ok",
+        status=status,
         timestamp=datetime.now().isoformat(),
         api_version=str(app.version),
-        trading_system_running=True,
-        data_feed_connected=True,
+        trading_system_running=trading_ok,
+        data_feed_connected=data_ok,
+        checks={
+            "sqlite": storage_check,
+            "trading": trading_check,
+            "market_data": data_check,
+        },
     )
+
+
+def _check_sqlite_storage(service: Any) -> dict[str, Any]:
+    """Run a lightweight SQLite health check against the configured runtime DB."""
+    db_path = (
+        getattr(getattr(service, "paper_broker", None), "storage_path", None)
+        or getattr(getattr(service, "market_cache", None), "db_path", None)
+        or "data/trading.db"
+    )
+    try:
+        path = Path(str(db_path)).resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(path) as conn:
+            quick_check = conn.execute("PRAGMA quick_check").fetchone()
+            conn.execute("SELECT 1").fetchone()
+        message = str(quick_check[0] if quick_check else "ok")
+        return {"ok": message.lower() == "ok", "engine": "sqlite", "path": str(path), "message": message}
+    except Exception as exc:
+        return {"ok": False, "engine": "sqlite", "path": str(db_path), "message": str(exc)}
+
+
+def _check_trading_system(service: Any) -> dict[str, Any]:
+    broker = getattr(service, "paper_broker", None)
+    account = {}
+    try:
+        if broker is not None and hasattr(broker, "get_account_info"):
+            account = broker.get_account_info()
+    except Exception as exc:
+        return {"ok": False, "mode": "crypto_paper", "message": str(exc)}
+    real_enabled = bool(account.get("real_trading_enabled", False))
+    connected = bool(getattr(broker, "is_connected", True))
+    return {
+        "ok": connected and not real_enabled,
+        "mode": "crypto_paper",
+        "paper_broker_connected": connected,
+        "real_trading_enabled": real_enabled,
+        "message": "paper broker ready" if connected and not real_enabled else "paper broker not ready",
+    }
+
+
+def _check_market_data(service: Any) -> dict[str, Any]:
+    symbol = (getattr(service, "default_symbols", None) or ["BTC/USDT"])[0]
+    try:
+        rows = service.provider.fetch_quotes([symbol])
+        if rows:
+            return {
+                "ok": True,
+                "symbol": symbol,
+                "source": str(rows[0].get("source", getattr(service.provider, "exchange_id", "binance"))),
+                "cache_available": True,
+                "message": "live quote available",
+            }
+        return {"ok": False, "symbol": symbol, "cache_available": False, "message": "live quote returned no rows"}
+    except Exception as exc:
+        cache_rows = []
+        try:
+            cache_rows = service.market_cache.get_quotes([symbol])
+        except Exception:
+            cache_rows = []
+        return {
+            "ok": False,
+            "symbol": symbol,
+            "source": "cache_binance" if cache_rows else "unavailable",
+            "cache_available": bool(cache_rows),
+            "message": f"live quote unavailable: {exc}",
+        }
 
 
 @app.api_route("/api/{full_path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)

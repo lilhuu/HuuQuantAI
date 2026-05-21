@@ -64,10 +64,8 @@ storage:
 database:
   engine: sqlite
   sqlite_path: data/trading.db
-  postgres_url: ${AUTO_TRADER_POSTGRES_URL}
-  pool_size: 5
-  max_overflow: 10
-  pool_pre_ping: true
+  route: sqlite_runtime
+  note: PostgreSQL migration is planned but not active in this build.
 
 system:
   auto_start: false
