@@ -224,6 +224,40 @@ async def get_crypto_auto_trading_logs(
     return await service.get_auto_trading_logs(limit=limit)
 
 
+@router.post("/ai/analyze", response_model=AiSignalAnalyzeResponse, summary="Run manual AI advisory analysis")
+async def analyze_crypto_ai_signal(
+    request: AiSignalAnalyzeRequest,
+    service: CryptoService = Depends(get_crypto_service),
+) -> AiSignalAnalyzeResponse:
+    return await service.analyze_ai_signal(request)
+
+
+@router.get("/ai/signals", response_model=AiSignalListResponse, summary="List AI advisory signals")
+async def list_crypto_ai_signals(
+    symbol: str | None = Query(default=None, description="Optional trading pair filter."),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    service: CryptoService = Depends(get_crypto_service),
+) -> AiSignalListResponse:
+    return await service.list_ai_signals(limit=limit, offset=offset, symbol=symbol)
+
+
+@router.get("/ai/signals/{signal_id}", response_model=AiSignalRecordResponse, summary="Get one AI advisory signal")
+async def get_crypto_ai_signal(
+    signal_id: str,
+    service: CryptoService = Depends(get_crypto_service),
+) -> AiSignalRecordResponse:
+    return await service.get_ai_signal(signal_id)
+
+
+@router.post("/ai/signals/{signal_id}/paper-order", response_model=AiSignalPaperOrderResponse, summary="Manually convert AI signal to paper order")
+async def create_crypto_ai_paper_order(
+    signal_id: str,
+    service: CryptoService = Depends(get_crypto_service),
+) -> AiSignalPaperOrderResponse:
+    return await service.create_ai_signal_paper_order(signal_id)
+
+
 @router.post("/shadow/orders", response_model=CryptoShadowTradeResponse, summary="Execute shadow trade")
 async def place_crypto_shadow_order(
     request: CryptoShadowOrderRequest,
