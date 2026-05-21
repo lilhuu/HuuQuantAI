@@ -242,6 +242,7 @@ def test_crypto_api_and_removed_legacy_routes(monkeypatch, tmp_path):
             assert "calmar_ratio" in first_backtest
             assert "win_rate" in first_backtest
             assert "profit_factor" in first_backtest
+            assert "diagnostics" in first_backtest
 
             order = client.post(
                 "/api/v1/crypto/paper/orders",
@@ -250,6 +251,15 @@ def test_crypto_api_and_removed_legacy_routes(monkeypatch, tmp_path):
             )
             assert order.status_code == 200
             assert order.json()["status"] == "filled"
+
+            portfolio = client.post(
+                "/api/v1/crypto/portfolio/returns",
+                headers=headers,
+                json={"mode": "live", "range": "all", "limit": 50},
+            )
+            assert portfolio.status_code == 200
+            assert "summary" in portfolio.json()
+            assert "equity_curve" in portfolio.json()
 
             testnet_status = client.get("/api/v1/crypto/testnet/status", headers=headers)
             assert testnet_status.status_code == 200

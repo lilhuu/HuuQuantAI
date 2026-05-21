@@ -350,6 +350,106 @@ class CryptoShadowLogsResponse(BaseModel):
     count: int = 0
 
 
+class PortfolioReturnRowResponse(BaseModel):
+    """One normalized portfolio return row."""
+
+    id: str = ""
+    source: str = "local_trade"
+    mode: str = "demo"
+    symbol: str = ""
+    side: str = ""
+    strategy_id: str | None = None
+    timeframe: str | None = None
+    status: str = "open"
+    opened_at: float | None = None
+    closed_at: float | None = None
+    timestamp: float = 0.0
+    realized_pnl: float = 0.0
+    unrealized_pnl: float = 0.0
+    total_pnl: float = 0.0
+    trade_roi_pct: float = 0.0
+    account_return_pct: float = 0.0
+    fee: float = 0.0
+    slippage_bps: float | None = None
+    margin: float | None = None
+    notional: float | None = None
+    amount: float | None = None
+    amount_type: str | None = None
+    leverage: float | None = None
+    entry_price: float | None = None
+    exit_price: float | None = None
+    mark_price: float | None = None
+    tp_price: float | None = None
+    sl_price: float | None = None
+    regime: str | None = None
+    macro_gate: str | None = None
+    entry_reason: str | None = None
+    exit_reason: str | None = None
+    hold_minutes: float | None = None
+    is_estimated: bool = False
+
+
+class PortfolioReturnGroupResponse(BaseModel):
+    """Portfolio return grouping row."""
+
+    key: str = ""
+    trades: int = 0
+    closed_trades: int = 0
+    pnl: float = 0.0
+    realized_pnl: float = 0.0
+    unrealized_pnl: float = 0.0
+    win_rate: float = 0.0
+    profit_factor: float = 0.0
+    avg_trade_roi_pct: float = 0.0
+
+
+class PortfolioReturnSummaryResponse(BaseModel):
+    """Portfolio return summary metrics."""
+
+    total_pnl: float = 0.0
+    realized_pnl: float = 0.0
+    unrealized_pnl: float = 0.0
+    account_return_pct: float = 0.0
+    avg_trade_roi_pct: float = 0.0
+    win_rate: float = 0.0
+    profit_factor: float = 0.0
+    max_drawdown_pct: float = 0.0
+    closed_trades: int = 0
+    open_trades: int = 0
+    total_rows: int = 0
+    gross_profit: float = 0.0
+    gross_loss: float = 0.0
+    fees: float = 0.0
+    avg_hold_minutes: float = 0.0
+
+
+class PortfolioEquityCurvePointResponse(BaseModel):
+    """One cumulative portfolio PnL point."""
+
+    timestamp: float = 0.0
+    label: str = ""
+    cumulative_pnl: float = 0.0
+    equity: float = 0.0
+    account_return_pct: float = 0.0
+    drawdown_pct: float = 0.0
+
+
+class PortfolioReturnsResponse(BaseModel):
+    """Portfolio return analytics response."""
+
+    mode: str = "demo"
+    range: str = "30d"
+    request_key: str = ""
+    generated_at: float = 0.0
+    capital_base: float = 0.0
+    capital_base_source: str = "none"
+    summary: PortfolioReturnSummaryResponse = Field(default_factory=PortfolioReturnSummaryResponse)
+    equity_curve: list[PortfolioEquityCurvePointResponse] = Field(default_factory=list)
+    by_symbol: list[PortfolioReturnGroupResponse] = Field(default_factory=list)
+    by_strategy: list[PortfolioReturnGroupResponse] = Field(default_factory=list)
+    history: list[PortfolioReturnRowResponse] = Field(default_factory=list)
+
+
 class BinanceTestnetStatusResponse(BaseModel):
     """Binance Spot Testnet safety status."""
 
@@ -552,6 +652,7 @@ class CryptoStrategyBacktestResultResponse(BaseModel):
     slippage_rate: float = 0.0
     min_quantity: float = 0.000001
     position_sizing: str = "strategy_position_ratio"
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
     message: str = "ok"
 
 

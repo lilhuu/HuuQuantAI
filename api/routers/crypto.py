@@ -13,6 +13,7 @@ from api.models.request import (
     CryptoStrategyBacktestRequest,
     CryptoStrategyRunRequest,
     CryptoStrategyWalkForwardRequest,
+    PortfolioReturnsRequest,
 )
 from api.models.response import (
     BinanceTestnetActionResponse,
@@ -38,6 +39,7 @@ from api.models.response import (
     MacroOverviewResponse,
     MarketRegimeBatchResponse,
     MessageResponse,
+    PortfolioReturnsResponse,
 )
 from api.services.crypto_service import CryptoService
 
@@ -184,6 +186,14 @@ async def get_crypto_shadow_logs(
     service: CryptoService = Depends(get_crypto_service),
 ) -> CryptoShadowLogsResponse:
     return await service.get_shadow_logs(limit=limit)
+
+
+@router.post("/portfolio/returns", response_model=PortfolioReturnsResponse, summary="Build portfolio return analytics")
+async def get_crypto_portfolio_returns(
+    request: PortfolioReturnsRequest,
+    service: CryptoService = Depends(get_crypto_service),
+) -> PortfolioReturnsResponse:
+    return await service.build_portfolio_returns(request)
 
 
 @router.get("/testnet/status", response_model=BinanceTestnetStatusResponse, summary="Get Binance Spot Testnet safety status")

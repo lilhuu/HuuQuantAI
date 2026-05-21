@@ -68,6 +68,15 @@ class CryptoShadowOrderRequest(BaseModel):
         return normalized
 
 
+class PortfolioReturnsRequest(BaseModel):
+    """Portfolio return analytics request."""
+
+    mode: Literal["live", "demo", "shadow"] = "live"
+    range: Literal["7d", "30d", "90d", "all"] = "30d"
+    limit: int = Field(default=200, ge=1, le=1000)
+    capital_base: float = Field(default=0.0, ge=0)
+
+
 class BinanceTestnetCredentialsRequest(BaseModel):
     """Local Binance Spot Testnet credential save request."""
 

@@ -10,6 +10,7 @@ from math import sqrt
 from statistics import fmean, pstdev
 from typing import Any
 
+from core.backtest_validation import categorize_no_entry_reason, create_backtest_diagnostics
 from core.crypto_strategy_engine import BUILTIN_STRATEGIES, CryptoStrategyEngine, StrategyConfig
 from core.risk_budget import RiskBudgetConfig, RiskBudgetSizer
 
@@ -73,6 +74,7 @@ class CryptoBacktestEngine:
         trades: list[dict[str, Any]] = []
         signal_count = 0
         equity_curve: list[dict[str, Any]] = []
+        no_entry_counts: dict[str, int] = {}
 
         for index in range(max_len):
             timestamp = ""
@@ -96,6 +98,9 @@ class CryptoBacktestEngine:
 
                 signal = self.strategy_engine.evaluate_strategy(config, symbol, window)
                 if not signal or signal.action == "HOLD":
+                    reason = signal.reason if signal else "insufficient indicators or no signal"
+                    category = categorize_no_entry_reason(config.type, reason)
+                    no_entry_counts[category] = no_entry_counts.get(category, 0) + 1
                     continue
                 signal_count += 1
                 if signal.action == "BUY":
@@ -125,6 +130,7 @@ class CryptoBacktestEngine:
         drawdown_curve = self._drawdown_curve(equity_curve)
         metrics = self._metrics(equity_curve, drawdown_curve, trades)
         final_equity = metrics["final_equity"]
+        diagnostics = self._diagnostics(trades, no_entry_counts)
         return {
             "strategy_id": config.strategy_id,
             "strategy_name": BUILTIN_STRATEGIES[config.type]["name"],
@@ -153,6 +159,7 @@ class CryptoBacktestEngine:
             "slippage_rate": self.slippage_rate,
             "min_quantity": self.min_quantity,
             "position_sizing": self.position_sizing,
+            "diagnostics": diagnostics,
             "message": "ok",
         }
 
@@ -225,8 +232,10 @@ class CryptoBacktestEngine:
             "realized_pnl": 0.0,
             "cash_after": cash_after,
             "reason": reason,
+            "entry_reason": reason,
             "stop_loss_price": stop_loss_price,
             "take_profit_price": take_profit_price,
+            "slippage_cost": abs(fill_price - price) * quantity,
         }
 
     def _sell(
@@ -267,6 +276,8 @@ class CryptoBacktestEngine:
             "realized_pnl": realized_pnl,
             "cash_after": cash_after,
             "reason": reason,
+            "exit_reason": self._exit_reason(reason),
+            "slippage_cost": abs(price - fill_price) * quantity,
         }
 
     def _maybe_exit_intrabar(
@@ -299,7 +310,25 @@ class CryptoBacktestEngine:
         if trade:
             trade["intrabar"] = True
             trade["trigger"] = result["trigger"]
+            trade["exit_reason"] = result["trigger"]
         return trade
+
+    def _diagnostics(self, trades: list[dict[str, Any]], no_entry_counts: dict[str, int]) -> dict[str, Any]:
+        exit_counts: dict[str, int] = {}
+        for trade in trades:
+            if str(trade.get("action", "")).upper() != "SELL":
+                continue
+            reason = str(trade.get("trigger") or trade.get("exit_reason") or "opposite_signal")
+            exit_counts[reason] = exit_counts.get(reason, 0) + 1
+        realized = [self._float(trade.get("realized_pnl")) for trade in trades if str(trade.get("action", "")).upper() == "SELL"]
+        return create_backtest_diagnostics(
+            no_entry_counts=no_entry_counts,
+            exit_counts=exit_counts,
+            win_pnls=[value for value in realized if value > 0],
+            loss_pnls=[value for value in realized if value < 0],
+            total_fees=sum(self._float(trade.get("fee")) for trade in trades),
+            total_execution_cost=sum(self._float(trade.get("slippage_cost", trade.get("slippage"))) for trade in trades),
+        ).to_dict()
 
     @staticmethod
     def _detect_intrabar_stop(
@@ -450,8 +479,19 @@ class CryptoBacktestEngine:
             "slippage_rate": self.slippage_rate,
             "min_quantity": self.min_quantity,
             "position_sizing": self.position_sizing,
+            "diagnostics": create_backtest_diagnostics().to_dict(),
             "message": message,
         }
+
+    def _exit_reason(self, reason: str) -> str:
+        text = str(reason or "").lower()
+        if "stop loss" in text or "止损" in text:
+            return "sl"
+        if "take profit" in text or "止盈" in text:
+            return "tp"
+        if "end" in text:
+            return "end"
+        return "opposite_signal"
 
     def _timestamp(self, item: dict[str, Any], index: int) -> str:
         return str(item.get("start_time") or item.get("timestamp") or item.get("time") or index)

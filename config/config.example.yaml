@@ -50,6 +50,14 @@ risk:
   allow_leverage: false
   real_trading_enabled: false
 
+notifications:
+  smtp:
+    host: ${HUU_SMTP_HOST}
+    port: 465
+    user: ${HUU_SMTP_USER}
+    pass: ${HUU_SMTP_PASSWORD}
+    recipient: ${HUU_SMTP_RECIPIENT}
+
 trading:
   mode: crypto_paper
   real_trading_enabled: false

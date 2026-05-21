@@ -4,6 +4,8 @@ import AccountView from "../views/AccountView.vue";
 import AuthView from "../views/AuthView.vue";
 import DashboardView from "../views/DashboardView.vue";
 import MarketView from "../views/MarketView.vue";
+import PortfolioView from "../views/PortfolioView.vue";
+import ReliabilityView from "../views/ReliabilityView.vue";
 import RiskView from "../views/RiskView.vue";
 import { useAuthStore } from "../stores/auth";
 import { pinia } from "../stores/pinia";
@@ -32,6 +34,12 @@ const router = createRouter({
       meta: { title: "账户状态", requiresAuth: true },
     },
     {
+      path: "/portfolio",
+      name: "portfolio",
+      component: PortfolioView,
+      meta: { title: "组合分析", requiresAuth: true },
+    },
+    {
       path: "/market",
       name: "market",
       component: MarketView,
@@ -52,7 +60,7 @@ const router = createRouter({
     {
       path: "/risk",
       name: "risk",
-      component: RiskView,
+      component: ReliabilityView,
       meta: { title: "风控中心", requiresAuth: true },
     },
     {

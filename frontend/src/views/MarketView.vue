@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from "vue";
 
+import CryptoKlineChart from "../components/CryptoKlineChart.vue";
 import { useTradingStore } from "../stores/trading";
 import { normalizeCryptoSymbol } from "../stores/tradingUtils";
 
@@ -11,7 +12,6 @@ const limitInput = ref(200);
 const quoteInput = ref(store.cryptoWatchSymbols.join(","));
 const orderBookSymbolInput = ref(store.selectedCryptoSymbol || "BTC/USDT");
 const orderBookLimitInput = ref(20);
-
 const periods = ["1m", "5m", "15m", "1h", "4h", "1d"];
 
 const latestQuote = computed(() => {
@@ -40,24 +40,6 @@ const socketLabel = computed(() => {
     error: "异常",
   };
   return labels[store.marketSocketState] || store.marketSocketState;
-});
-
-const candlePath = computed(() => {
-  const items = candles.value;
-  if (!items.length) {
-    return "";
-  }
-  const values = items.map((item) => Number(item.close || 0));
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const spread = Math.max(max - min, 1);
-  return values
-    .map((value, index) => {
-      const x = (index / Math.max(values.length - 1, 1)) * 1000;
-      const y = 260 - ((value - min) / spread) * 220;
-      return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
-    })
-    .join(" ");
 });
 
 async function refreshQuotes() {
@@ -239,10 +221,7 @@ async function loadOrderBook() {
       </div>
 
       <div class="chart-surface">
-        <svg viewBox="0 0 1000 300" role="img" aria-label="Crypto kline close price chart">
-          <path v-if="candlePath" :d="candlePath" fill="none" stroke="#25d0cf" stroke-width="4" />
-          <text v-else x="40" y="160" fill="#8fa7c4">暂无 K 线数据</text>
-        </svg>
+        <CryptoKlineChart :candles="candles" :height="380" />
       </div>
     </article>
   </section>

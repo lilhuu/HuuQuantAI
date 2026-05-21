@@ -17,6 +17,7 @@ from api.models.request import (
     CryptoStrategyBacktestRequest,
     CryptoStrategyRunRequest,
     CryptoStrategyWalkForwardRequest,
+    PortfolioReturnsRequest,
 )
 from api.models.response import (
     BinanceTestnetActionResponse,
@@ -53,6 +54,7 @@ from api.models.response import (
     MacroOverviewResponse,
     MarketRegimeResponse,
     MarketRegimeBatchResponse,
+    PortfolioReturnsResponse,
     WalkForwardRoundResponse,
     WalkForwardStrategySummaryResponse,
     WalkForwardSymbolSummaryResponse,
@@ -67,6 +69,7 @@ from core.crypto_backtest_engine import CryptoBacktestEngine
 from core.crypto_strategy_engine import CryptoStrategyEngine
 from core.macro_data_provider import MacroDataProvider
 from core.macro_risk import MacroRiskEvaluator
+from core.portfolio_returns import build_portfolio_return_analytics
 from core.regime_detector import RegimeDetector
 from core.shadow_trading import ShadowTradingEngine
 from core.walk_forward_backtest import WalkForwardConfig, WalkForwardRunner
@@ -365,6 +368,21 @@ class CryptoService:
         items = [CryptoShadowTradeResponse(**item) for item in rows]
         return CryptoShadowLogsResponse(items=items, count=len(items))
 
+    async def build_portfolio_returns(self, request: PortfolioReturnsRequest) -> PortfolioReturnsResponse:
+        account = self.paper_broker.get_account_info()
+        capital_base = float(request.capital_base or 0.0) or float(account.get("equity") or account.get("initial_cash") or 0.0)
+        trades = self._portfolio_paper_rows()
+        shadow_rows = self._portfolio_shadow_rows()
+        analytics = build_portfolio_return_analytics(
+            mode=request.mode,
+            range=request.range,
+            trades=trades,
+            shadow_orders=shadow_rows,
+            capital_base=capital_base,
+            limit=request.limit,
+        )
+        return PortfolioReturnsResponse(**analytics.to_dict())
+
     async def get_testnet_status(self) -> BinanceTestnetStatusResponse:
         return BinanceTestnetStatusResponse(**self.testnet_executor.status())
 
@@ -490,6 +508,114 @@ class CryptoService:
 
     def record_klines(self, rows: list[dict[str, Any]]) -> None:
         self.market_cache.upsert_klines(rows)
+
+    def _portfolio_paper_rows(self) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for trade in self.paper_broker.trade_history:
+            action = str(trade.get("action") or "").upper()
+            timestamp = str(trade.get("timestamp") or "")
+            quantity = float(trade.get("quantity", 0) or 0)
+            price = float(trade.get("price", 0) or 0)
+            row = {
+                "id": str(trade.get("trade_id") or trade.get("order_id") or ""),
+                "trade_id": str(trade.get("trade_id") or ""),
+                "order_id": str(trade.get("order_id") or ""),
+                "symbol": str(trade.get("symbol") or ""),
+                "side": action,
+                "status": "closed" if action == "SELL" else "settled",
+                "created_at": timestamp,
+                "closed_at": timestamp if action == "SELL" else None,
+                "timestamp": timestamp,
+                "strategy_id": str(trade.get("strategy") or ""),
+                "quantity": quantity,
+                "amount": quantity,
+                "price": price,
+                "entry_price": price if action == "BUY" else None,
+                "exit_price": price if action == "SELL" else None,
+                "notional": quantity * price,
+                "fee": float(trade.get("fee", 0) or 0),
+                "realized_pnl": float(trade.get("realized_pnl", 0) or 0),
+                "reason": str(trade.get("strategy") or ""),
+            }
+            rows.append(row)
+
+        for position in self.paper_broker.get_positions():
+            rows.append(
+                {
+                    "id": f"open_{position.get('symbol', '')}",
+                    "symbol": str(position.get("symbol") or ""),
+                    "side": "BUY",
+                    "status": "open",
+                    "created_at": "",
+                    "timestamp": time.time(),
+                    "strategy_id": "open_position",
+                    "quantity": float(position.get("quantity", 0) or 0),
+                    "amount": float(position.get("quantity", 0) or 0),
+                    "avg_price": float(position.get("avg_price", 0) or 0),
+                    "entry_price": float(position.get("avg_price", 0) or 0),
+                    "current_price": float(position.get("current_price", 0) or 0),
+                    "mark_price": float(position.get("current_price", 0) or 0),
+                    "market_value": float(position.get("market_value", 0) or 0),
+                    "notional": float(position.get("cost_basis", 0) or 0),
+                    "unrealized_pnl": float(position.get("unrealized_pnl", 0) or 0),
+                }
+            )
+        return rows
+
+    def _portfolio_shadow_rows(self) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        mark_prices = self._fetch_mark_prices([item.get("symbol", "") for item in self.shadow_engine.get_positions()])
+        for position in self.shadow_engine.get_positions():
+            symbol = str(position.get("symbol") or "")
+            quantity = float(position.get("quantity", 0) or 0)
+            avg_price = float(position.get("avg_price", 0) or 0)
+            mark_price = float(mark_prices.get(symbol, avg_price) or avg_price)
+            rows.append(
+                {
+                    "id": f"shadow_{symbol}",
+                    "symbol": symbol,
+                    "side": "BUY",
+                    "status": "open",
+                    "created_at": position.get("created_at") or "",
+                    "timestamp": position.get("created_at") or time.time(),
+                    "strategy_id": position.get("signal_source") or "shadow",
+                    "quantity": quantity,
+                    "amount": quantity,
+                    "entry_price": avg_price,
+                    "avg_price": avg_price,
+                    "mark_price": mark_price,
+                    "notional": quantity * avg_price,
+                    "unrealized_pnl": (mark_price - avg_price) * quantity,
+                    "slippage_bps": float(position.get("estimated_slippage_pct", 0) or 0) * 100,
+                    "stop_loss_price": position.get("stop_loss_price"),
+                    "take_profit_price": position.get("take_profit_price"),
+                    "is_estimated": True,
+                }
+            )
+        for log in self.shadow_engine.trade_log:
+            if str(log.get("action") or "").upper() == "SELL":
+                rows.append(
+                    {
+                        **log,
+                        "id": f"shadow_log_{log.get('timestamp', '')}_{log.get('symbol', '')}",
+                        "status": "closed",
+                        "closed_at": log.get("timestamp"),
+                        "entry_price": log.get("price"),
+                        "exit_price": log.get("price"),
+                        "is_estimated": True,
+                    }
+                )
+        return rows
+
+    def _fetch_mark_prices(self, symbols: list[str]) -> dict[str, float]:
+        normalized = self._normalize_symbols([symbol for symbol in symbols if symbol])
+        if not normalized:
+            return {}
+        try:
+            return {row["symbol"]: float(row.get("price", 0) or 0) for row in self.provider.fetch_quotes(normalized)}
+        except Exception:
+            cached = self.market_cache.get_quotes(normalized)
+            return {row["symbol"]: float(row.get("price", 0) or 0) for row in cached}
 
     async def get_connection_health(self) -> ConnectionHealthResponse:
         return ConnectionHealthResponse(**self.provider.get_connection_health())
