@@ -1,6 +1,7 @@
 ﻿import { createRouter, createWebHistory } from "vue-router";
 
 import AccountView from "../views/AccountView.vue";
+import AiAdvisorView from "../views/AiAdvisorView.vue";
 import AutoTradingView from "../views/AutoTradingView.vue";
 import AuthView from "../views/AuthView.vue";
 import DashboardView from "../views/DashboardView.vue";
@@ -57,6 +58,12 @@ const router = createRouter({
       name: "auto-trading",
       component: AutoTradingView,
       meta: { title: "自动交易", requiresAuth: true },
+    },
+    {
+      path: "/ai",
+      name: "ai-advisor",
+      component: AiAdvisorView,
+      meta: { title: "AI 助手", requiresAuth: true },
     },
     {
       path: "/strategy",

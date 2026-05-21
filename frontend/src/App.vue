@@ -18,6 +18,7 @@ const navItems = [
   { label: "市场分析", icon: "trend", to: "/market" },
   { label: "手动交易", icon: "clock", to: "/trade" },
   { label: "自动交易", icon: "target", to: "/auto" },
+  { label: "AI 助手", icon: "target", to: "/ai" },
   { label: "账户状态", icon: "wallet", to: "/account" },
   { label: "组合分析", icon: "wallet", to: "/portfolio" },
   { label: "策略验证", icon: "flask", to: "/strategy" },
@@ -148,6 +149,14 @@ watch(
         >
           <span class="cq-icon" :data-icon="item.icon" aria-hidden="true"></span>
           <span>{{ item.label }}</span>
+        </RouterLink>
+        <RouterLink
+          to="/ai"
+          class="cq-nav__item"
+          :class="{ active: route.path === '/ai' }"
+        >
+          <span class="cq-icon" data-icon="target" aria-hidden="true"></span>
+          <span>AI 助手</span>
         </RouterLink>
       </nav>
 
