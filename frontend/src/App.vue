@@ -150,14 +150,6 @@ watch(
           <span class="cq-icon" :data-icon="item.icon" aria-hidden="true"></span>
           <span>{{ item.label }}</span>
         </RouterLink>
-        <RouterLink
-          to="/ai"
-          class="cq-nav__item"
-          :class="{ active: route.path === '/ai' }"
-        >
-          <span class="cq-icon" data-icon="target" aria-hidden="true"></span>
-          <span>AI 助手</span>
-        </RouterLink>
       </nav>
 
       <div class="cq-sidebar-card">

@@ -98,6 +98,14 @@ async function submitOrder() {
       </div>
 
       <p v-if="formMessage" class="helper-text">{{ formMessage }}</p>
+
+      <div v-if="store.errorInfo" class="error-banner error-banner--business">
+        <div>
+          <strong>{{ store.errorInfo.title || '订单错误' }}</strong>
+          <p>{{ store.errorInfo.message }}</p>
+        </div>
+        <button class="ghost-button" @click="store.clearError()">关闭</button>
+      </div>
     </article>
 
     <article class="panel-card">

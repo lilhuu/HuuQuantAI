@@ -325,24 +325,6 @@ button {
   font-size: 13px;
 }
 
-.page-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
-}
-
-.panel {
-  padding: 22px;
-  border: 1px solid var(--line);
-  border-radius: 26px;
-  background: linear-gradient(180deg, var(--panel-strong), var(--panel));
-  box-shadow: var(--shadow);
-}
-
-.panel-wide {
-  grid-column: 1 / -1;
-}
-
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -846,8 +828,7 @@ th {
   .hero-ribbon,
   .topbar-status-list,
   .quick-command-grid,
-  .signal-strip,
-  .page-grid {
+  .signal-strip {
     grid-template-columns: 1fr;
   }
 }
@@ -882,11 +863,6 @@ th {
   .signal-strip,
   .timeline-board-compact {
     grid-template-columns: 1fr;
-  }
-
-  .panel {
-    padding: 18px;
-    border-radius: 22px;
   }
 
   .hero-card strong,
@@ -1784,14 +1760,8 @@ body,
 }
 
 .cq-brand span,
-.cq-page-head p,
-.cq-panel__heading p,
-.cq-metric-card span,
-.cq-health-grid span,
 .cq-top-stat span,
-.cq-mode-card span,
-.cq-log-box p,
-.cq-price-footer span {
+.cq-mode-card span {
   color: #9b9ba7;
 }
 
@@ -2042,9 +2012,7 @@ body,
 }
 
 .cq-market-strip,
-.cq-top-actions,
-.cq-control-row,
-.cq-period-tabs {
+.cq-top-actions {
   display: flex;
   align-items: center;
   gap: 14px;
@@ -2058,8 +2026,7 @@ body,
 .cq-icon-button,
 .cq-primary-button,
 .cq-muted-button,
-.cq-accent-button,
-.cq-period-tabs button {
+.cq-accent-button {
   border: 1px solid #272730;
   border-radius: 20px;
   background: #101014;
@@ -2240,72 +2207,6 @@ body,
   display: block;
   margin-top: 6px;
   font-size: 20px;
-}
-
-.cq-log-box {
-  margin-top: 30px;
-  border: 1px solid #25252e;
-  border-radius: 18px;
-  overflow: hidden;
-  background: #09090c;
-}
-
-.cq-log-box strong {
-  display: block;
-  padding: 16px 20px;
-  border-bottom: 1px solid #25252e;
-}
-
-.cq-log-box p {
-  margin: 0;
-  padding: 18px 20px;
-}
-
-.cq-log-list p + p {
-  border-top: 1px solid #202026;
-}
-
-.cq-price-panel {
-  min-height: 560px;
-}
-
-.cq-period-tabs {
-  margin-top: 26px;
-}
-
-.cq-period-tabs button {
-  min-width: 62px;
-  min-height: 42px;
-  padding: 0 16px;
-}
-
-.cq-period-tabs button.active {
-  color: #d7d3ff;
-  border-color: rgba(126, 113, 255, 0.55);
-  background: #232054;
-}
-
-.cq-price-chart {
-  display: grid;
-  place-items: center;
-  height: 354px;
-  margin-top: 24px;
-  border: 1px dashed #2b2b32;
-  border-radius: 4px;
-  background: #151518;
-}
-
-.cq-price-chart svg {
-  width: 100%;
-  height: 100%;
-}
-
-.cq-price-footer {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  margin-top: 18px;
-  color: #f4f4f6;
 }
 
 .cq-error {

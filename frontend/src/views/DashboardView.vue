@@ -80,104 +80,109 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="cq-page-head">
-    <h1>仪表盘</h1>
-    <p>账户摘要、运行控制和自动交易扫描配置。</p>
-  </section>
+  <section class="workspace-grid workspace-grid--stacked">
+    <div class="page-head">
+      <h1>仪表盘</h1>
+      <p>账户摘要、运行控制和自动交易扫描配置。</p>
+    </div>
 
-  <section class="cq-card-grid cq-card-grid--four">
-    <article v-for="item in accountCards" :key="item.label" class="cq-metric-card">
-      <span>{{ item.label }}</span>
-      <strong>{{ item.value }}</strong>
-    </article>
-  </section>
+    <div class="metric-grid">
+      <div v-for="item in accountCards" :key="item.label">
+        <span>{{ item.label }}</span>
+        <strong>{{ item.value }}</strong>
+      </div>
+    </div>
 
-  <section class="cq-dashboard-grid">
-    <article class="cq-panel cq-run-panel">
-      <div class="cq-panel__heading">
-        <div>
-          <h2>运行控制</h2>
-          <p>启动、停止或立即触发一轮自动交易扫描。</p>
+    <div class="workspace-grid workspace-grid--columns">
+      <article class="panel-card">
+        <div class="panel-heading">
+          <div>
+            <h3>运行控制</h3>
+            <p>启动、停止或立即触发一轮自动交易扫描。</p>
+          </div>
+          <span class="status-chip" :class="autoStore.enabled ? 'status-chip--connected' : 'status-chip--idle'">{{ autoStore.stateLabel }}</span>
         </div>
-        <span class="cq-pill">{{ autoStore.stateLabel }}</span>
-      </div>
 
-      <div class="cq-health-grid">
-        <div>
-          <span>Binance 公共接口</span>
-          <strong>{{ store.marketSocketState === "connected" ? "已连接" : "未检查" }}</strong>
+        <div class="metric-grid">
+          <div>
+            <span>Binance 公共接口</span>
+            <strong>{{ store.marketSocketState === "connected" ? "已连接" : "未检查" }}</strong>
+          </div>
+          <div>
+            <span>真实交易</span>
+            <strong>永久关闭</strong>
+          </div>
+          <div>
+            <span>自动模式</span>
+            <strong>{{ autoStore.enabled ? "模拟运行中" : "未启动" }}</strong>
+          </div>
         </div>
-        <div>
-          <span>真实交易</span>
-          <strong>永久关闭</strong>
+
+        <div class="button-row">
+          <button class="primary-button" @click="autoStore.start()">启动</button>
+          <button class="ghost-button" @click="autoStore.stop()">停止</button>
+          <button class="ghost-button" @click="scanNow">立即扫描</button>
         </div>
-        <div>
-          <span>自动模式</span>
-          <strong>{{ autoStore.enabled ? "模拟运行中" : "未启动" }}</strong>
+
+        <div class="metric-grid">
+          <div>
+            <span>自助交易</span>
+            <strong>{{ autoStore.stateLabel }}</strong>
+          </div>
+          <div>
+            <span>信心阈值</span>
+            <strong>{{ Number(autoStore.configDraft.confidence_threshold || 0).toFixed(2) }}</strong>
+          </div>
+          <div>
+            <span>最近周期</span>
+            <strong>{{ chartPeriod }}</strong>
+          </div>
         </div>
-      </div>
 
-      <div class="cq-control-row">
-        <button class="cq-primary-button" @click="autoStore.start()">启动</button>
-        <button class="cq-muted-button" @click="autoStore.stop()">停止</button>
-        <button class="cq-accent-button" @click="scanNow">立即扫描</button>
-      </div>
-
-      <div class="cq-card-grid cq-card-grid--three">
-        <article class="cq-metric-card cq-metric-card--compact">
-          <span>自助交易</span>
-          <strong>{{ autoStore.stateLabel }}</strong>
-        </article>
-        <article class="cq-metric-card cq-metric-card--compact">
-          <span>信心阈值</span>
-          <strong>{{ Number(autoStore.configDraft.confidence_threshold || 0).toFixed(2) }}</strong>
-        </article>
-        <article class="cq-metric-card cq-metric-card--compact">
-          <span>最近周期</span>
-          <strong>{{ chartPeriod }}</strong>
-        </article>
-      </div>
-
-      <section class="cq-log-box">
-        <strong>自动交易活动日志</strong>
-        <div v-if="autoStore.logs.length" class="cq-log-list">
-          <p v-for="log in autoStore.logs.slice(-5)" :key="`${log.timestamp}-${log.event}`">
-            {{ log.event }} · {{ log.message }}
-          </p>
+        <div class="timeline-list">
+          <div class="panel-heading">
+            <strong>自动交易活动日志</strong>
+          </div>
+          <div v-if="autoStore.logs.length" class="timeline-item" v-for="log in autoStore.logs.slice(-5)" :key="`${log.timestamp}-${log.event}`">
+            <strong>{{ log.event }}</strong>
+            <p>{{ log.message }}</p>
+            <small>{{ log.timestamp }}</small>
+          </div>
+          <div v-else-if="recentOrders.length" v-for="order in recentOrders" :key="order.order_id" class="timeline-item">
+            <strong>{{ order.symbol }} {{ order.action }}</strong>
+            <p>{{ order.status }} · {{ order.quantity }}</p>
+          </div>
+          <p v-else class="helper-text">暂无自动交易日志。</p>
         </div>
-        <div v-else-if="recentOrders.length" class="cq-log-list">
-          <p v-for="order in recentOrders" :key="order.order_id">
-            {{ order.symbol }} {{ order.action }} · {{ order.status }} · {{ order.quantity }}
-          </p>
+      </article>
+
+      <article class="panel-card">
+        <div class="panel-heading">
+          <div>
+            <h3>价格概览</h3>
+            <p>{{ store.selectedCryptoSymbol }} {{ chartPeriod }} 价格曲线</p>
+          </div>
         </div>
-        <p v-else>暂无自动交易日志。</p>
-      </section>
-    </article>
 
-    <article class="cq-panel cq-price-panel">
-      <div class="cq-panel__heading">
-        <div>
-          <h2>价格概览</h2>
-          <p>{{ store.selectedCryptoSymbol }} {{ chartPeriod }} 价格曲线</p>
+        <div class="button-row">
+          <button :class="{ active: chartPeriod === '15m' }" @click="loadPeriod('15m')">15m</button>
+          <button :class="{ active: chartPeriod === '1h' }" @click="loadPeriod('1h')">1h</button>
         </div>
-      </div>
 
-      <div class="cq-period-tabs">
-        <button :class="{ active: chartPeriod === '15m' }" @click="loadPeriod('15m')">15m</button>
-        <button :class="{ active: chartPeriod === '1h' }" @click="loadPeriod('1h')">1h</button>
-      </div>
+        <div class="chart-surface">
+          <svg viewBox="0 0 700 320" role="img" aria-label="价格概览">
+            <path v-if="pricePath" :d="pricePath" fill="none" stroke="#7c6cff" stroke-width="3" />
+            <text v-if="!pricePath" x="280" y="166" fill="#6f6f7c">暂无价格曲线</text>
+          </svg>
+        </div>
 
-      <div class="cq-price-chart">
-        <svg viewBox="0 0 700 320" role="img" aria-label="价格概览">
-          <path v-if="pricePath" :d="pricePath" fill="none" stroke="#7c6cff" stroke-width="3" />
-          <text v-if="!pricePath" x="280" y="166" fill="#6f6f7c">暂无价格曲线</text>
-        </svg>
-      </div>
-
-      <div class="cq-price-footer">
-        <span>最新价</span>
-        <strong>{{ store.formatPrice(latestQuote?.price || candles.at(-1)?.close || 0) }}</strong>
-      </div>
-    </article>
+        <div class="metric-grid">
+          <div>
+            <span>最新价</span>
+            <strong>{{ store.formatPrice(latestQuote?.price || candles.at(-1)?.close || 0) }}</strong>
+          </div>
+        </div>
+      </article>
+    </div>
   </section>
 </template>

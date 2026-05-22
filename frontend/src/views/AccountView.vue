@@ -5,6 +5,19 @@ import { useTradingStore } from "../stores/trading";
 
 const store = useTradingStore();
 const latestEquity = computed(() => store.cryptoEquityCurve.at(-1) || null);
+
+function formatTime(iso) {
+  if (!iso) return "-";
+  const date = new Date(iso);
+  if (isNaN(date.getTime())) return iso;
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
 </script>
 
 <template>
@@ -123,7 +136,7 @@ const latestEquity = computed(() => store.cryptoEquityCurve.at(-1) || null);
             <strong>{{ item.event }}</strong>
             <p>{{ item.message }}</p>
           </div>
-          <span class="timeline-item__side">{{ item.timestamp }}</span>
+          <span class="timeline-item__side">{{ formatTime(item.timestamp) }}</span>
         </div>
         <div v-if="!store.cryptoLogs.length" class="timeline-item">
           <div>

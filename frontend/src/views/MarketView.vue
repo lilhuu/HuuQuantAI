@@ -158,7 +158,7 @@ async function loadOrderBook() {
           <div v-for="(bid, idx) in topBids" :key="`b${idx}`" class="orderbook-row orderbook-row--bid">
             <span class="number-up">{{ store.formatPrice(bid[0]) }}</span>
             <span>{{ bid[1]?.toFixed(6) || "-" }}</span>
-            <span>{{ store.formatPrice(topBids.slice(0, idx + 1).reduce((sum, item) => sum + (item[0] || 0) * (item[1] || 0), 0)) }}</span>
+            <span>{{ store.formatPrice(topBids.slice(0, idx + 1).reduce((sum, item) => sum + (item[1] || 0), 0)) }}</span>
           </div>
         </div>
         <div class="orderbook-side">
@@ -171,7 +171,7 @@ async function loadOrderBook() {
           <div v-for="(ask, idx) in topAsks" :key="`a${idx}`" class="orderbook-row orderbook-row--ask">
             <span class="number-down">{{ store.formatPrice(ask[0]) }}</span>
             <span>{{ ask[1]?.toFixed(6) || "-" }}</span>
-            <span>{{ store.formatPrice(topAsks.slice(0, idx + 1).reduce((sum, item) => sum + (item[0] || 0) * (item[1] || 0), 0)) }}</span>
+            <span>{{ store.formatPrice(topAsks.slice(0, idx + 1).reduce((sum, item) => sum + (item[1] || 0), 0)) }}</span>
           </div>
         </div>
       </div>
