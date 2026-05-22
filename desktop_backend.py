@@ -30,6 +30,8 @@ def main() -> None:
     os.environ.setdefault("AUTO_TRADER_HOST", "127.0.0.1")
     os.environ.setdefault("PYTHONUTF8", "1")
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+    # Prevent stale PYTHONPATH contamination from legacy unpacked runtime deps
+    os.environ.pop("PYTHONPATH", None)
 
     ensure_desktop_environment()
     setup_desktop_logging()

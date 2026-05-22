@@ -23,6 +23,9 @@ for package in [
     "websockets",
     "ccxt",
     "openai",
+    "sqlite3",
+    "sqlite3.dbapi2",
+    "zoneinfo",
 ]:
     try:
         hiddenimports += collect_submodules(package)
