@@ -16,32 +16,32 @@ from core.regime_detector import MarketRegime
 BUILTIN_STRATEGIES: dict[str, dict[str, Any]] = {
     "dual_ma": {
         "type": "dual_ma",
-        "name": "双均线策略",
-        "description": "快慢均线交叉产生趋势信号。",
+        "name": "Dual MA Crossover",
+        "description": "Trend-following signals from fast and slow moving-average crosses.",
         "parameters": {"fast_period": 12, "slow_period": 26, "position_ratio": 0.2, "stop_loss_atr_multiplier": 2.0, "take_profit_atr_multiplier": 3.0, "risk_per_trade_pct": 0.02},
     },
     "rsi": {
         "type": "rsi",
-        "name": "RSI 超买超卖策略",
-        "description": "RSI 低于超卖线买入，高于超买线卖出。",
+        "name": "RSI Mean Reversion",
+        "description": "Buy when RSI is oversold and sell when RSI is overbought.",
         "parameters": {"period": 14, "oversold": 30, "overbought": 70, "position_ratio": 0.2, "stop_loss_atr_multiplier": 1.5, "take_profit_atr_multiplier": 2.5, "risk_per_trade_pct": 0.02},
     },
     "macd": {
         "type": "macd",
-        "name": "MACD 趋势策略",
-        "description": "DIF/DEA 金叉死叉产生趋势信号。",
+        "name": "MACD Trend",
+        "description": "Trend signals from DIF/DEA crossovers.",
         "parameters": {"fast_period": 12, "slow_period": 26, "signal_period": 9, "position_ratio": 0.2, "stop_loss_atr_multiplier": 2.0, "take_profit_atr_multiplier": 3.0, "risk_per_trade_pct": 0.02},
     },
     "bollinger": {
         "type": "bollinger",
-        "name": "布林带均值回归策略",
-        "description": "价格触及下轨买入，触及上轨卖出。",
-        "parameters": {"period": 20, "stddev_multiplier": 2.0, "position_ratio": 0.2, "stop_loss_atr_multiplier": 1.5, "take_profit_atr_multiplier": 1.0, "risk_per_trade_pct": 0.02},
+        "name": "Bollinger Mean Reversion",
+        "description": "Buy lower-band extremes and sell upper-band extremes, with optional higher-timeframe trend protection.",
+        "parameters": {"period": 20, "stddev_multiplier": 2.0, "position_ratio": 0.2, "stop_loss_atr_multiplier": 1.5, "take_profit_atr_multiplier": 1.0, "risk_per_trade_pct": 0.02, "use_higher_tf_trend_filter": True},
     },
     "momentum": {
         "type": "momentum",
-        "name": "动量突破策略",
-        "description": "按回看涨跌幅突破阈值产生信号。",
+        "name": "Momentum Breakout",
+        "description": "Generate signals when lookback returns break configured thresholds.",
         "parameters": {"lookback_period": 20, "buy_threshold": 0.03, "sell_threshold": -0.02, "position_ratio": 0.2, "stop_loss_atr_multiplier": 2.0, "take_profit_atr_multiplier": 4.0, "risk_per_trade_pct": 0.02},
     },
 }
@@ -73,6 +73,9 @@ class StrategySignal:
     timeframe: str = "1h"
     indicators: dict[str, float] = field(default_factory=dict)
     regime_score: float = 0.0
+    blocked: bool = False
+    block_reason: str = ""
+    macro_gate_state: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -90,6 +93,9 @@ class StrategySignal:
             "timestamp": self.timestamp,
             "indicators": self.indicators,
             "regime_score": self.regime_score,
+            "blocked": self.blocked,
+            "block_reason": self.block_reason,
+            "macro_gate_state": self.macro_gate_state,
         }
 
 
@@ -155,16 +161,19 @@ class CryptoStrategyEngine:
         regimes: dict[str, MarketRegime | str] | None = None,
         regime_scores: dict[str, float] | None = None,
         macro_gate: MacroGateDecision | None = None,
+        higher_tf_trends: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         signals: list[StrategySignal] = []
+        blocked_signals: list[StrategySignal] = []
         strategy_results: list[dict[str, Any]] = []
         for config in configs:
             strategy_signals: list[StrategySignal] = []
             if config.enabled:
                 for symbol in config.symbols:
                     candles = market_data.get(symbol, [])
+                    effective_config = self._with_higher_tf_trend(config, (higher_tf_trends or {}).get(symbol))
                     signal = self.evaluate_strategy_with_regime(
-                        config,
+                        effective_config,
                         symbol,
                         candles,
                         regime=(regimes or {}).get(symbol),
@@ -172,6 +181,8 @@ class CryptoStrategyEngine:
                     )
                     if signal:
                         signal = self.apply_macro_gate(signal, macro_gate)
+                        if signal.blocked:
+                            blocked_signals.append(signal)
                         strategy_signals.append(signal)
                         signals.append(signal)
             strategy_results.append(
@@ -188,6 +199,19 @@ class CryptoStrategyEngine:
         summary = self.aggregate_signals(signals, conflict_threshold=conflict_threshold)
         return {
             "signals": [item.to_dict() for item in signals],
+            "blocked": [
+                {
+                    "symbol": item.symbol,
+                    "timeframe": item.timeframe,
+                    "strategy_id": item.strategy_id,
+                    "strategy_type": item.strategy_type,
+                    "action": item.action,
+                    "reason": item.block_reason or item.reason,
+                    "confidence": item.confidence,
+                    "score": item.weighted_score,
+                }
+                for item in blocked_signals
+            ],
             "summary": summary,
             "strategy_results": strategy_results,
         }
@@ -214,6 +238,11 @@ class CryptoStrategyEngine:
         audit_logger = audit_logger or AuditLogger()
         audit_trails = []
         trail_by_key: dict[tuple[str, str, str], Any] = {}
+        higher_tf_trends: dict[str, HigherTimeframeTrend] = {}
+        trend_source = "4h" if "4h" in market_data else "1d" if "1d" in market_data else ""
+        if trend_source:
+            for symbol, candles in market_data[trend_source].items():
+                higher_tf_trends[symbol] = build_higher_timeframe_trend(candles, timeframe=trend_source)
 
         for config in configs:
             strategy_signals: list[StrategySignal] = []
@@ -221,6 +250,7 @@ class CryptoStrategyEngine:
                 for symbol in config.symbols:
                     for timeframe, timeframe_data in market_data.items():
                         candles = timeframe_data.get(symbol, [])
+                        effective_config = self._with_higher_tf_trend(config, higher_tf_trends.get(symbol))
                         trail = audit_logger.create_trail(symbol, timeframe, config.strategy_id)
                         trail_by_key[(symbol, timeframe, config.strategy_id)] = trail
                         if macro_gate is not None:
@@ -233,7 +263,7 @@ class CryptoStrategyEngine:
                                 reason=macro_gate.reason,
                             )
                         signal = self.evaluate_strategy_with_regime(
-                            config,
+                            effective_config,
                             symbol,
                             candles,
                             regime=(regimes or {}).get(symbol),
@@ -275,12 +305,6 @@ class CryptoStrategyEngine:
                     "signals": [item.to_dict() for item in strategy_signals],
                 }
             )
-
-        higher_tf_trends: dict[str, HigherTimeframeTrend] = {}
-        trend_source = "4h" if "4h" in market_data else "1d" if "1d" in market_data else ""
-        if trend_source:
-            for symbol, candles in market_data[trend_source].items():
-                higher_tf_trends[symbol] = build_higher_timeframe_trend(candles, timeframe=trend_source)
 
         resolver = ConflictResolver(max_positions=max_positions)
         result = resolver.resolve(all_signals, higher_tf_trends)
@@ -606,7 +630,11 @@ class CryptoStrategyEngine:
             return signal
 
         signal.indicators["macro_score"] = self._float(macro_gate.score)
+        signal.indicators["macro_position_multiplier"] = self._float(macro_gate.position_size_multiplier)
+        signal.macro_gate_state = macro_gate.state.value
         if macro_gate.state == MacroGateState.BLOCK_NEW_RISK and signal.action == "BUY":
+            signal.blocked = True
+            signal.block_reason = macro_gate.reason
             signal.action = "HOLD"
             signal.confidence = 0.0
             signal.weighted_score = 0.0
@@ -621,6 +649,27 @@ class CryptoStrategyEngine:
             signal.reason = f"[Macro REDUCED] {signal.reason}"
         return signal
 
+    def _with_higher_tf_trend(self, config: StrategyConfig, trend: Any | None) -> StrategyConfig:
+        if config.type != "bollinger" or trend is None:
+            return config
+        return StrategyConfig(
+            strategy_id=config.strategy_id,
+            type=config.type,
+            symbols=config.symbols,
+            weight=config.weight,
+            enabled=config.enabled,
+            parameters={**config.parameters, "higher_tf_trend": self._trend_payload(trend)},
+        )
+
+    def _trend_payload(self, trend: Any) -> dict[str, Any]:
+        if isinstance(trend, dict):
+            return dict(trend)
+        return {
+            "direction": str(getattr(trend, "direction", "neutral") or "neutral"),
+            "four_hour_change_pct": self._float(getattr(trend, "four_hour_change_pct", 0.0)),
+            "daily_change_pct": self._float(getattr(trend, "daily_change_pct", 0.0)),
+        }
+
     def aggregate_signals(self, signals: list[StrategySignal], conflict_threshold: float = 0.15) -> list[dict[str, Any]]:
         by_symbol: dict[str, list[StrategySignal]] = {}
         for signal in signals:
@@ -631,18 +680,22 @@ class CryptoStrategyEngine:
             buy_score = sum(max(item.weighted_score, 0.0) for item in items)
             sell_score = abs(sum(min(item.weighted_score, 0.0) for item in items))
             hold_count = sum(1 for item in items if item.action == "HOLD")
+            blocked_count = sum(1 for item in items if item.blocked)
             conflict = buy_score > 0 and sell_score > 0
             net_score = buy_score - sell_score
             threshold = max(float(conflict_threshold or 0), 0.0)
-            if abs(net_score) <= threshold:
+            if blocked_count and buy_score <= 0 and sell_score <= 0:
                 action = "HOLD"
-                reason = "信号冲突或权重差不足"
+                reason = "blocked by macro or risk gate"
+            elif abs(net_score) <= threshold:
+                action = "HOLD"
+                reason = "signal conflict or insufficient weighted edge"
             elif net_score > 0:
                 action = "BUY"
-                reason = "买入权重占优"
+                reason = "buy score dominates"
             else:
                 action = "SELL"
-                reason = "卖出权重占优"
+                reason = "sell score dominates"
             summary.append(
                 {
                     "symbol": symbol,
@@ -745,13 +798,13 @@ class CryptoStrategyEngine:
         slow_prev = fmean(closes[-slow - 1 : -1])
         if fast_prev <= slow_prev and fast_now > slow_now:
             action = "BUY"
-            reason = f"{fast}/{slow} 均线金叉"
+            reason = f"{fast}/{slow} moving-average golden cross"
         elif fast_prev >= slow_prev and fast_now < slow_now:
             action = "SELL"
-            reason = f"{fast}/{slow} 均线死叉"
+            reason = f"{fast}/{slow} moving-average death cross"
         else:
             action = "HOLD"
-            reason = "均线未交叉"
+            reason = "moving averages have not crossed"
         confidence = min(abs(fast_now - slow_now) / max(slow_now, 1.0) * 20 + 0.25, 1.0)
         return {"action": action, "confidence": confidence, "reason": reason, "indicators": {"fast_ma": fast_now, "slow_ma": slow_now}}
 
@@ -764,15 +817,15 @@ class CryptoStrategyEngine:
         overbought = float(params.get("overbought", 70) or 70)
         if rsi <= oversold:
             action = "BUY"
-            reason = f"RSI 超卖 {rsi:.2f}"
+            reason = f"RSI oversold {rsi:.2f}"
             confidence = min((oversold - rsi) / max(oversold, 1.0) + 0.35, 1.0)
         elif rsi >= overbought:
             action = "SELL"
-            reason = f"RSI 超买 {rsi:.2f}"
+            reason = f"RSI overbought {rsi:.2f}"
             confidence = min((rsi - overbought) / max(100 - overbought, 1.0) + 0.35, 1.0)
         else:
             action = "HOLD"
-            reason = f"RSI 中性 {rsi:.2f}"
+            reason = f"RSI neutral {rsi:.2f}"
             confidence = 0.2
         return {"action": action, "confidence": confidence, "reason": reason, "indicators": {"rsi": rsi}}
 
@@ -790,13 +843,13 @@ class CryptoStrategyEngine:
         macd_prev = dif[-2] - dea[-2]
         if macd_prev <= 0 < macd_now:
             action = "BUY"
-            reason = "MACD 金叉"
+            reason = "MACD bullish cross"
         elif macd_prev >= 0 > macd_now:
             action = "SELL"
-            reason = "MACD 死叉"
+            reason = "MACD bearish cross"
         else:
             action = "HOLD"
-            reason = "MACD 未交叉"
+            reason = "MACD has not crossed"
         confidence = min(abs(macd_now) / max(closes[-1], 1.0) * 100 + 0.25, 1.0)
         return {"action": action, "confidence": confidence, "reason": reason, "indicators": {"dif": dif[-1], "dea": dea[-1], "macd": macd_now}}
 
@@ -812,18 +865,38 @@ class CryptoStrategyEngine:
         lower = middle - multiplier * deviation
         price = closes[-1]
         if deviation <= 0:
-            return {"action": "HOLD", "confidence": 0.1, "reason": "布林带无波动", "indicators": {"middle": middle, "upper": upper, "lower": lower}}
+            return {"action": "HOLD", "confidence": 0.1, "reason": "bollinger band has no volatility", "indicators": {"middle": middle, "upper": upper, "lower": lower}}
+
+        higher_tf_trend = self._trend_payload(params.get("higher_tf_trend") or {})
+        higher_tf_direction = str(higher_tf_trend.get("direction") or "neutral").lower()
+        trend_filter_enabled = bool(params.get("use_higher_tf_trend_filter", True))
         if price <= lower:
             action = "BUY"
-            reason = "价格触及布林下轨"
+            reason = "price touched lower Bollinger band"
+            if trend_filter_enabled and higher_tf_direction in {"down", "trend_down", "bear", "bearish", "risk_off"}:
+                action = "HOLD"
+                reason = "higher timeframe downtrend blocks Bollinger mean-reversion long"
         elif price >= upper:
             action = "SELL"
-            reason = "价格触及布林上轨"
+            reason = "price touched upper Bollinger band"
         else:
             action = "HOLD"
-            reason = "价格位于布林带内"
+            reason = "price is inside Bollinger bands"
         confidence = min(abs(price - middle) / max(upper - lower, 1.0) * 2 + 0.2, 1.0)
-        return {"action": action, "confidence": confidence, "reason": reason, "indicators": {"middle": middle, "upper": upper, "lower": lower}}
+        if action == "HOLD" and "higher timeframe" in reason:
+            confidence = min(confidence, 0.15)
+        return {
+            "action": action,
+            "confidence": confidence,
+            "reason": reason,
+            "indicators": {
+                "middle": middle,
+                "upper": upper,
+                "lower": lower,
+                "higher_tf_4h_change_pct": self._float(higher_tf_trend.get("four_hour_change_pct")),
+                "higher_tf_daily_change_pct": self._float(higher_tf_trend.get("daily_change_pct")),
+            },
+        }
 
     def _momentum(self, closes: list[float], params: dict[str, Any]) -> dict[str, Any] | None:
         lookback = max(int(params.get("lookback_period", params.get("period", 20)) or 20), 1)
@@ -837,13 +910,13 @@ class CryptoStrategyEngine:
         sell_threshold = float(params.get("sell_threshold", -0.02) or -0.02)
         if momentum >= buy_threshold:
             action = "BUY"
-            reason = f"动量向上突破 {momentum:.2%}"
+            reason = f"momentum breakout up {momentum:.2%}"
         elif momentum <= sell_threshold:
             action = "SELL"
-            reason = f"动量向下跌破 {momentum:.2%}"
+            reason = f"momentum breakdown {momentum:.2%}"
         else:
             action = "HOLD"
-            reason = f"动量未突破 {momentum:.2%}"
+            reason = f"momentum below threshold {momentum:.2%}"
         confidence = min(abs(momentum) / max(abs(buy_threshold), abs(sell_threshold), 0.01) * 0.6 + 0.2, 1.0)
         return {"action": action, "confidence": confidence, "reason": reason, "indicators": {"momentum": momentum}}
 

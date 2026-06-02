@@ -155,6 +155,9 @@ class AutoTradingConfigRequest(BaseModel):
     max_order_notional: float = Field(default=1000, ge=1)
     min_order_notional: float = Field(default=10, ge=0)
     confidence_threshold: float = Field(default=0.35, ge=0, le=1)
+    max_daily_loss: float = Field(default=0, ge=0)
+    max_consecutive_losses: int = Field(default=0, ge=0, le=100)
+    cooldown_minutes: int = Field(default=30, ge=1, le=1440)
     real_trading_enabled: bool = False
     strategies: list[CryptoStrategyConfigRequest] = Field(default_factory=list)
 

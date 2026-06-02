@@ -154,6 +154,65 @@ def test_macro_gate_blocks_buy_and_reduces_signal():
     assert "[Macro REDUCED]" in reduced.reason
 
 
+def test_strategy_run_exposes_macro_blocked_signals():
+    engine = CryptoStrategyEngine()
+    config = engine.normalize_configs(
+        [
+            {
+                "strategy_id": "macro_run_momentum",
+                "type": "momentum",
+                "symbols": ["BTC/USDT"],
+                "parameters": {"lookback_period": 5, "buy_threshold": 0.01, "sell_threshold": -0.02},
+            }
+        ],
+        ["BTC/USDT"],
+    )
+
+    result = engine.run(
+        {"BTC/USDT": _candles_for_buy()},
+        config,
+        macro_gate=MacroRiskEvaluator().evaluate(_snapshot(dxy_available=True, dxy_change_30d_pct=5.0)),
+    )
+
+    assert result["signals"][0]["blocked"] is True
+    assert result["signals"][0]["macro_gate_state"] == "BLOCK_NEW_RISK"
+    assert result["blocked"][0]["strategy_id"] == "macro_run_momentum"
+
+
+def test_bollinger_blocks_mean_reversion_buy_against_higher_timeframe_downtrend():
+    engine = CryptoStrategyEngine()
+    config = engine.normalize_configs(
+        [
+            {
+                "strategy_id": "bollinger_guard",
+                "type": "bollinger",
+                "symbols": ["BTC/USDT"],
+                "parameters": {"period": 20, "stddev_multiplier": 2.0},
+            }
+        ],
+        ["BTC/USDT"],
+    )[0]
+    candles = [
+        {"symbol": "BTC/USDT", "period": "1h", "close": close}
+        for close in ([100] * 19 + [80])
+    ]
+
+    unguarded = engine.evaluate_strategy(config, "BTC/USDT", candles)
+    guarded = engine.evaluate_strategy(
+        engine._with_higher_tf_trend(
+            config,
+            {"direction": "down", "four_hour_change_pct": -4.0, "daily_change_pct": -8.0},
+        ),
+        "BTC/USDT",
+        candles,
+    )
+
+    assert unguarded.action == "BUY"
+    assert guarded.action == "HOLD"
+    assert "higher timeframe" in guarded.reason
+    assert guarded.confidence <= 0.15
+
+
 def test_macro_provider_cache_returns_cached_value():
     provider = MacroDataProvider()
     calls = {"count": 0}

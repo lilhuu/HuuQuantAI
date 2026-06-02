@@ -8,7 +8,7 @@ orders through CryptoPaperBroker.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
 from core.crypto_market_data_provider import normalize_crypto_symbol
@@ -63,6 +63,9 @@ class AutoTradingConfig:
     max_order_notional: float = 1000.0
     min_order_notional: float = 10.0
     confidence_threshold: float = 0.35
+    max_daily_loss: float = 0.0
+    max_consecutive_losses: int = 0
+    cooldown_minutes: int = 30
     real_trading_enabled: bool = False
     strategies: list[dict[str, Any]] = field(default_factory=list)
 
@@ -93,6 +96,9 @@ class AutoTradingConfig:
             max_order_notional=max(1.0, float(data.get("max_order_notional", 1000.0) or 1000.0)),
             min_order_notional=max(0.0, float(data.get("min_order_notional", 10.0) or 10.0)),
             confidence_threshold=max(0.0, min(float(data.get("confidence_threshold", 0.35) or 0.35), 1.0)),
+            max_daily_loss=max(0.0, float(data.get("max_daily_loss", 0.0) or 0.0)),
+            max_consecutive_losses=max(0, int(data.get("max_consecutive_losses", 0) or 0)),
+            cooldown_minutes=max(1, min(int(data.get("cooldown_minutes", 30) or 30), 24 * 60)),
             real_trading_enabled=bool(data.get("real_trading_enabled", False)),
             strategies=strategies,
         )
@@ -110,8 +116,35 @@ class AutoTradingConfig:
             "max_order_notional": self.max_order_notional,
             "min_order_notional": self.min_order_notional,
             "confidence_threshold": self.confidence_threshold,
+            "max_daily_loss": self.max_daily_loss,
+            "max_consecutive_losses": self.max_consecutive_losses,
+            "cooldown_minutes": self.cooldown_minutes,
             "real_trading_enabled": False,
             "strategies": list(self.strategies),
+        }
+
+
+@dataclass
+class RiskState:
+    """Runtime risk state for automatic paper trading."""
+
+    trading_day: str = ""
+    day_start_equity: float = 0.0
+    daily_pnl: float = 0.0
+    consecutive_losses: int = 0
+    kill_switch_active: bool = False
+    cooldown_until: str = ""
+    reason: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "trading_day": self.trading_day,
+            "day_start_equity": round(float(self.day_start_equity or 0.0), 8),
+            "daily_pnl": round(float(self.daily_pnl or 0.0), 8),
+            "consecutive_losses": int(self.consecutive_losses or 0),
+            "kill_switch_active": bool(self.kill_switch_active),
+            "cooldown_until": self.cooldown_until,
+            "reason": self.reason,
         }
 
 
@@ -128,6 +161,10 @@ class AutoTradingEngine:
         self.order_count = 0
         self.last_decisions: list[dict[str, Any]] = []
         self.logs: list[dict[str, Any]] = []
+        self.risk_state = RiskState()
+        self.loop_running = False
+        self.next_run_at = ""
+        self.last_error_type = ""
         self._log("INFO", "initialized", "Paper auto trading engine initialized")
 
     def update_config(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -146,14 +183,24 @@ class AutoTradingEngine:
             self._log("ERROR", "start_blocked", self.last_message)
             return self.status()
         self.config.enabled = True
+        if self._cooldown_active():
+            self.state = "paused"
+            self.last_message = f"auto trading is cooling down until {self.risk_state.cooldown_until}"
+            self._log("WARNING", "start_blocked_by_cooldown", self.last_message, {"risk_state": self.risk_state.to_dict()})
+            return self.status()
+        self.risk_state.kill_switch_active = False
+        self.risk_state.reason = ""
         self.state = "running"
         self.last_message = "auto trading is running in paper mode"
+        self.last_error_type = ""
         self._log("INFO", "started", self.last_message)
         return self.status()
 
     def pause(self) -> dict[str, Any]:
         self.state = "paused"
         self.config.enabled = False
+        self.loop_running = False
+        self.next_run_at = ""
         self.last_message = "auto trading is paused"
         self._log("INFO", "paused", self.last_message)
         return self.status()
@@ -161,6 +208,8 @@ class AutoTradingEngine:
     def stop(self) -> dict[str, Any]:
         self.state = "stopped"
         self.config.enabled = False
+        self.loop_running = False
+        self.next_run_at = ""
         self.last_message = "auto trading is stopped"
         self._log("INFO", "stopped", self.last_message)
         return self.status()
@@ -176,6 +225,7 @@ class AutoTradingEngine:
         self.last_run_at = _now()
         self.cycle_count += 1
         self.signal_count += len(strategy_result.get("signals") or [])
+        self._update_risk_state(account)
 
         price_by_symbol = {
             str(item.get("symbol") or ""): float(item.get("price", 0) or 0)
@@ -227,6 +277,15 @@ class AutoTradingEngine:
     def record_order_result(self, decision: dict[str, Any], order: dict[str, Any]) -> None:
         if str(order.get("status") or "").lower() in {"filled", "partial_filled"}:
             self.order_count += 1
+            realized_pnl = float(order.get("realized_pnl", 0) or 0)
+            if realized_pnl < 0:
+                self.risk_state.consecutive_losses += 1
+                if self.config.max_consecutive_losses and self.risk_state.consecutive_losses >= self.config.max_consecutive_losses:
+                    self._activate_kill_switch(
+                        f"consecutive losses reached {self.risk_state.consecutive_losses}/{self.config.max_consecutive_losses}"
+                    )
+            elif realized_pnl > 0:
+                self.risk_state.consecutive_losses = 0
         self._log(
             "INFO" if order.get("status") != "rejected" else "WARNING",
             "paper_order_result",
@@ -236,7 +295,12 @@ class AutoTradingEngine:
 
     def record_error(self, message: str, payload: dict[str, Any] | None = None) -> None:
         self.last_message = message
+        self.last_error_type = str((payload or {}).get("type") or "RuntimeError")
         self._log("ERROR", "cycle_failed", message, payload)
+
+    def mark_loop(self, *, running: bool, next_run_at: str = "") -> None:
+        self.loop_running = bool(running)
+        self.next_run_at = next_run_at if running else ""
 
     def status(self) -> dict[str, Any]:
         return {
@@ -251,7 +315,11 @@ class AutoTradingEngine:
             "order_count": self.order_count,
             "last_decisions": list(self.last_decisions),
             "logs": self.get_logs(50),
+            "risk_state": self.risk_state.to_dict(),
             "real_trading_enabled": False,
+            "loop_running": bool(self.loop_running),
+            "next_run_at": self.next_run_at,
+            "last_error_type": self.last_error_type,
         }
 
     def get_logs(self, limit: int = 100) -> list[dict[str, Any]]:
@@ -276,6 +344,7 @@ class AutoTradingEngine:
     ) -> dict[str, Any]:
         position = positions.get(symbol) or {}
         quantity_held = float(position.get("quantity", 0) or 0)
+        steps: list[dict[str, Any]] = []
         base = {
             "timestamp": _now(),
             "symbol": symbol,
@@ -289,49 +358,81 @@ class AutoTradingEngine:
             "status": "skipped",
             "message": "",
             "place_orders": bool(place_orders),
+            "steps": steps,
         }
 
         if self.config.real_trading_enabled:
             base["message"] = "real trading is blocked"
+            steps.append(self._decision_step("real_trading_gate", "fail", base["message"]))
             return base
+        steps.append(self._decision_step("real_trading_gate", "pass", "paper mode enforced"))
+        if self._cooldown_active():
+            base["message"] = f"risk cooldown active until {self.risk_state.cooldown_until}"
+            steps.append(self._decision_step("risk_cooldown", "fail", base["message"]))
+            return base
+        steps.append(self._decision_step("risk_cooldown", "pass", "no active cooldown"))
+        if self.risk_state.kill_switch_active:
+            base["message"] = self.risk_state.reason or "risk kill switch active"
+            steps.append(self._decision_step("kill_switch", "fail", base["message"]))
+            return base
+        steps.append(self._decision_step("kill_switch", "pass", "kill switch inactive"))
         if price <= 0:
             base["message"] = "missing executable price"
+            steps.append(self._decision_step("market_data", "fail", base["message"]))
             return base
+        steps.append(self._decision_step("market_data", "pass", "executable price available"))
         if confidence < self.config.confidence_threshold:
             base["message"] = f"confidence below threshold {self.config.confidence_threshold:.2f}"
+            steps.append(self._decision_step("confidence", "fail", base["message"]))
             return base
+        steps.append(self._decision_step("confidence", "pass", f"{confidence:.2f} >= {self.config.confidence_threshold:.2f}"))
         if not place_orders:
             base["status"] = "simulated"
             base["message"] = "decision preview only; no paper order sent"
+            steps.append(self._decision_step("submit_mode", "skip", base["message"]))
+        else:
+            steps.append(self._decision_step("submit_mode", "pass", "paper order submission requested"))
 
         if action == "BUY":
             if quantity_held > 0:
                 base["message"] = "position already exists"
+                steps.append(self._decision_step("duplicate_position", "fail", base["message"]))
                 return base
+            steps.append(self._decision_step("duplicate_position", "pass", "no existing position"))
             if current_position_count >= self.config.max_positions:
                 base["message"] = "max open positions reached"
+                steps.append(self._decision_step("max_positions", "fail", base["message"]))
                 return base
+            steps.append(self._decision_step("max_positions", "pass", f"{current_position_count} < {self.config.max_positions}"))
             ratio = float(candidate.get("adjusted_position_ratio") or self.config.per_trade_position_ratio)
             ratio = max(0.001, min(ratio, self.config.per_trade_position_ratio, 1.0))
             notional = min(equity * ratio, self.config.max_order_notional, cash)
             if notional < self.config.min_order_notional:
                 base["message"] = "notional below minimum or cash unavailable"
+                steps.append(self._decision_step("notional", "fail", base["message"]))
                 return base
+            steps.append(self._decision_step("notional", "pass", f"approved notional {notional:.2f}"))
             base["quantity"] = round(notional / price, 8)
             base["notional"] = round(base["quantity"] * price, 8)
             if base["quantity"] <= 0:
                 base["message"] = "quantity rounded to zero"
+                steps.append(self._decision_step("quantity", "fail", base["message"]))
                 return base
+            steps.append(self._decision_step("quantity", "pass", f"quantity {base['quantity']}"))
         else:
             if quantity_held <= 0:
                 base["message"] = "no position to sell; short selling disabled"
+                steps.append(self._decision_step("short_selling", "fail", base["message"]))
                 return base
+            steps.append(self._decision_step("short_selling", "pass", "existing long position available"))
             base["quantity"] = round(quantity_held, 8)
             base["notional"] = round(base["quantity"] * price, 8)
+            steps.append(self._decision_step("quantity", "pass", f"sell quantity {base['quantity']}"))
 
         if place_orders:
             base["status"] = "ready"
             base["message"] = "ready for paper order"
+            steps.append(self._decision_step("submit", "pass", base["message"]))
         return base
 
     def _candidates(self, strategy_result: dict[str, Any]) -> list[dict[str, Any]]:
@@ -356,3 +457,53 @@ class AutoTradingEngine:
         )
         if len(self.logs) > 500:
             self.logs = self.logs[-500:]
+
+    def _update_risk_state(self, account: dict[str, Any]) -> None:
+        today = datetime.now(timezone.utc).date().isoformat()
+        equity = float(account.get("equity") or account.get("cash") or 0.0)
+        if self.risk_state.trading_day != today:
+            self.risk_state.trading_day = today
+            self.risk_state.day_start_equity = equity
+            self.risk_state.daily_pnl = 0.0
+        if self.risk_state.day_start_equity <= 0 and equity > 0:
+            self.risk_state.day_start_equity = equity
+        self.risk_state.daily_pnl = equity - float(self.risk_state.day_start_equity or equity)
+        if self.config.max_daily_loss and self.risk_state.daily_pnl <= -abs(self.config.max_daily_loss):
+            self._activate_kill_switch(
+                f"daily loss {self.risk_state.daily_pnl:.2f} reached limit -{abs(self.config.max_daily_loss):.2f}"
+            )
+
+    def _activate_kill_switch(self, reason: str) -> None:
+        cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=self.config.cooldown_minutes)
+        self.risk_state.kill_switch_active = True
+        self.risk_state.cooldown_until = cooldown_until.isoformat()
+        self.risk_state.reason = reason
+        self.state = "paused"
+        self.config.enabled = False
+        self.last_message = reason
+        self._log("ERROR", "risk_kill_switch", reason, {"risk_state": self.risk_state.to_dict()})
+
+    def _cooldown_active(self) -> bool:
+        if not self.risk_state.cooldown_until:
+            return False
+        try:
+            until = datetime.fromisoformat(self.risk_state.cooldown_until)
+        except ValueError:
+            return False
+        if until.tzinfo is None:
+            until = until.replace(tzinfo=timezone.utc)
+        active = datetime.now(timezone.utc) < until
+        if not active and self.risk_state.kill_switch_active:
+            self.risk_state.kill_switch_active = False
+            self.risk_state.cooldown_until = ""
+            self.risk_state.reason = ""
+            self._log("INFO", "risk_cooldown_expired", "risk cooldown expired")
+        return active
+
+    def _decision_step(self, name: str, status: str, reason: str) -> dict[str, Any]:
+        return {
+            "name": name,
+            "status": status,
+            "reason": reason,
+            "timestamp": _now(),
+        }

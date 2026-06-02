@@ -15,6 +15,13 @@ const statusTone = computed(() => {
   return "status-chip--idle";
 });
 
+function formatDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
 function syncSymbolsFromDraft() {
   symbolsInput.value = autoStore.symbolsText();
 }
@@ -40,7 +47,7 @@ onMounted(async () => {
 <template>
   <section class="cq-page-head">
     <h1>自动交易</h1>
-    <p>基于策略信号自动扫描并只提交本地模拟订单。真实交易永久默认关闭。</p>
+    <p>基于策略信号按周期扫描，只向本地模拟盘提交订单。真实交易保持关闭。</p>
   </section>
 
   <section v-if="autoStore.errorInfo" class="cq-error">
@@ -57,6 +64,21 @@ onMounted(async () => {
       <strong>{{ autoStore.stateLabel }}</strong>
     </article>
     <article class="cq-metric-card">
+      <span>后台循环</span>
+      <strong>{{ autoStore.loopRunning ? "运行中" : "未运行" }}</strong>
+    </article>
+    <article class="cq-metric-card">
+      <span>下次扫描</span>
+      <strong>{{ formatDateTime(autoStore.nextRunAt) }}</strong>
+    </article>
+    <article class="cq-metric-card">
+      <span>最近错误</span>
+      <strong>{{ autoStore.lastErrorType || "无" }}</strong>
+    </article>
+  </section>
+
+  <section class="cq-card-grid cq-card-grid--four">
+    <article class="cq-metric-card">
       <span>扫描次数</span>
       <strong>{{ autoStore.status?.cycle_count || 0 }}</strong>
     </article>
@@ -68,6 +90,10 @@ onMounted(async () => {
       <span>模拟订单</span>
       <strong>{{ autoStore.status?.order_count || 0 }}</strong>
     </article>
+    <article class="cq-metric-card">
+      <span>扫描间隔</span>
+      <strong>{{ autoStore.configDraft.scan_interval_seconds || 30 }}s</strong>
+    </article>
   </section>
 
   <section class="workspace-grid">
@@ -75,7 +101,7 @@ onMounted(async () => {
       <div class="panel-heading">
         <div>
           <span class="eyebrow">Paper Auto Trading</span>
-          <h3>自助交易配置</h3>
+          <h3>自动交易配置</h3>
         </div>
         <span class="status-chip" :class="statusTone">{{ autoStore.stateLabel }}</span>
       </div>
@@ -131,7 +157,7 @@ onMounted(async () => {
       </div>
 
       <p class="helper-text">
-        当前模式：{{ autoStore.configDraft.mode }}，真实交易：关闭。启动后本页只会向 CryptoPaperBroker 发送模拟订单。
+        当前模式：{{ autoStore.configDraft.mode }}，真实交易：关闭。启动后只会向 CryptoPaperBroker 发送模拟订单。
       </p>
     </article>
 

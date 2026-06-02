@@ -15,6 +15,7 @@ const SYSTEM_EVENT_CLEAR_MS = 4200;
 const ORDER_HIGHLIGHT_CLEAR_MS = 3600;
 
 function createTonePlayer() {
+  /** @type {AudioContext | null} */
   let audioContext = null;
 
   function getAudioContext() {
@@ -22,7 +23,9 @@ function createTonePlayer() {
       return null;
     }
 
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    const AudioContextClass =
+      window.AudioContext ||
+      /** @type {Window & { webkitAudioContext?: typeof AudioContext }} */ (window).webkitAudioContext;
     if (!AudioContextClass) {
       return null;
     }

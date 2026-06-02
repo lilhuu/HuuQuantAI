@@ -2,7 +2,7 @@
 
 HuuQuantAI 是本地运行的加密货币量化交易工作台，包含 FastAPI 后端、Vue 前端、Binance 公共行情、WebSocket 实时行情、本地模拟交易、策略验证、回测、风控、审计和桌面一体化打包。
 
-当前版本默认只做模拟交易。Binance mainnet 真实下单保持关闭；Testnet 执行器默认 dry-run。
+当前版本只用于 Binance 公共行情、本地模拟盘和策略验证。Binance mainnet 真实交易未接入；Testnet 执行器默认 dry-run，即使解锁也不会发送真实交易传输。
 
 ## 桌面应用
 
@@ -50,6 +50,7 @@ Copy-Item config\config.example.yaml config\config.yaml
 - `BINANCE_TESTNET_API_KEY`
 - `BINANCE_TESTNET_API_SECRET`
 - `FRED_API_KEY`
+- `OPENAI_API_KEY`
 
 ## 本地启动
 
@@ -92,18 +93,19 @@ npm.cmd run dev
 
 ## 项目结构
 
-- `api/`：FastAPI 后端、REST 接口、WebSocket、服务层
-- `frontend/`：Vue + Pinia 前端工作台
-- `desktop/`：Electron 桌面壳
-- `config/`：示例配置、API 配置和配置加载器
-- `core/`：行情、策略、回测、风控、审计、执行和数据缓存核心模块
-- `scripts/`：本地启动和桌面构建脚本
-- `tests/`：测试用例
+- `api/`: FastAPI 后端、REST 接口、WebSocket、服务层
+- `frontend/`: Vue + Pinia 前端工作台
+- `desktop/`: Electron 桌面壳
+- `config/`: 示例配置、API 配置和配置加载器
+- `core/`: 行情、策略、回测、风控、审计、执行和数据缓存核心模块
+- `scripts/`: 本地启动和桌面构建脚本
+- `tests/`: 测试用例
 
 ## 安全说明
 
 - 默认交易模式是 `crypto_paper`。
-- `real_trading_enabled` 默认必须为 `false`。
-- Binance mainnet 真实交易尚未接入。
-- Testnet 启用前需要单独确认短语，默认仍是 dry-run。
+- `real_trading_enabled` 默认并且必须保持为 `false`。
+- Binance mainnet 真实交易未接入。
+- Testnet 真实传输在当前构建中仍被拒绝；默认只接受 dry-run。
 - 本地数据库、日志、打包产物、密钥和真实配置不进入 Git。
+- 主网交易前必须另行实现 Binance 签名下单、订单状态同步、撤单、余额同步、交易所精度校验和更强密钥保护。

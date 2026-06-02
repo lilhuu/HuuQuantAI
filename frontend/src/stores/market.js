@@ -6,6 +6,35 @@ import { createReconnectingSocket } from "../lib/reconnectingSocket";
 import { createCryptoSocket } from "../lib/ws";
 import { normalizeCryptoSymbol } from "./tradingUtils";
 
+/**
+ * @typedef {Object} CryptoQuote
+ * @property {string} symbol
+ * @property {number=} price
+ * @property {string=} source
+ * @property {string=} timestamp
+ */
+
+/**
+ * @param {Array<string | number | null | undefined>} symbols
+ * @returns {string[]}
+ */
+export function uniqueCryptoSymbols(symbols = []) {
+  return [...new Set((symbols || []).map((item) => normalizeCryptoSymbol(item)).filter(Boolean))];
+}
+
+/**
+ * @param {string} state
+ * @returns {string}
+ */
+export function cryptoMarketStatusMessage(state) {
+  if (state === "connecting") return "正在连接 Binance 实时行情";
+  if (state === "connected") return "Binance 实时行情已连接";
+  if (state === "snapshot_loading") return "正在加载 REST 行情快照";
+  if (state === "reconnecting") return "实时行情断线重连中";
+  if (state === "error") return "实时行情连接异常";
+  return "实时行情未连接";
+}
+
 export const useMarketStore = defineStore("trading-market", () => {
   const cryptoQuotes = ref([]);
   const cryptoKlines = ref([]);
@@ -18,7 +47,12 @@ export const useMarketStore = defineStore("trading-market", () => {
   const marketSocketState = ref("idle");
   const marketStatusMessage = ref("实时行情未连接");
   const lastMarketMessageAt = ref("");
-  const cryptoOrderBook = ref({ bids: [], asks: [] });
+  const cryptoOrderBook = ref(
+    /** @type {{ bids: unknown[], asks: unknown[], symbol?: string, timestamp?: string, source?: string }} */ ({
+      bids: [],
+      asks: [],
+    }),
+  );
   const orderBookLoading = ref(false);
   const marketSocketActive = ref(false);
 
@@ -244,7 +278,7 @@ export const useMarketStore = defineStore("trading-market", () => {
   }
 
   function uniqueSymbols(symbols = []) {
-    return [...new Set((symbols || []).map((item) => normalizeCryptoSymbol(item)).filter(Boolean))];
+    return uniqueCryptoSymbols(symbols);
   }
 
   function statusMessageForState(state) {

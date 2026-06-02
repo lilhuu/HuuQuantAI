@@ -151,7 +151,6 @@ async function startBackend() {
     AUTO_TRADER_APP_DATA_DIR: appDataDir,
     PYTHONUTF8: "1",
     PYTHONIOENCODING: "utf-8",
-    // Clear PYTHONPATH to prevent contamination from stale runtime deps
     PYTHONPATH: "",
   };
 

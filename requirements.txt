@@ -4,8 +4,10 @@ numpy>=1.24.0
 
 # Crypto market data
 ccxt>=4.4.0
-tvdatafeed>=2.1.0
 fredapi>=0.5.2
+# Optional TradingView macro feed. Install from its upstream source when needed;
+# the runtime treats it as optional and falls back gracefully if unavailable.
+# tvdatafeed
 
 # Configuration
 pyyaml>=6.0

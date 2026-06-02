@@ -8,7 +8,7 @@ const store = useTradingStore();
 const autoStore = useAutoTradingStore();
 
 const riskItems = computed(() => [
-  { label: "真实交易", value: autoStore.configDraft.real_trading_enabled ? "⚠ 已开启" : "永久关闭", tone: "status-chip--idle" },
+  { label: "真实交易", value: autoStore.configDraft.real_trading_enabled ? "已开启" : "永久关闭", tone: "status-chip--idle" },
   { label: "做空", value: "禁止", tone: "status-chip--idle" },
   { label: "杠杆", value: "禁止", tone: "status-chip--idle" },
   {
@@ -172,7 +172,7 @@ onMounted(async () => {
       </div>
       <div class="timeline-list">
         <div v-for="(item, idx) in blockedDecisions" :key="idx" class="timeline-item">
-          <strong>{{ item.symbol }} · {{ item.strategy_id || "—" }}</strong>
+          <strong>{{ item.symbol }} / {{ item.strategy_id || "-" }}</strong>
           <p>{{ item.reason || "风控阻断" }}</p>
           <small>{{ item.timestamp || "" }}</small>
         </div>
@@ -188,7 +188,7 @@ onMounted(async () => {
       </div>
       <div class="timeline-list">
         <div v-for="(item, idx) in failedDecisions" :key="idx" class="timeline-item">
-          <strong>{{ item.symbol }} · {{ item.strategy_id || "—" }}</strong>
+          <strong>{{ item.symbol }} / {{ item.strategy_id || "-" }}</strong>
           <p>{{ item.reason || item.error || "执行失败" }}</p>
           <small>{{ item.timestamp || "" }}</small>
         </div>

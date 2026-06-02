@@ -135,11 +135,15 @@ class ShadowTradingEngine:
 
         if order_book:
             fill = self.impact.simulate_fill(order_book, action, quantity)
+            theoretical_price = self._theoretical_price(order_book, action)
         else:
             reference = self._reference_price(symbol)
             slipped = reference * (1.0005 if action == "BUY" else 0.9995)
             fill = FillResult(float(quantity or 0), slipped, float(quantity or 0) * slipped, 0.05, 0, 0.0, [])
+            theoretical_price = reference
 
+        executable_price = fill.average_price
+        slippage_bps = self._slippage_bps(action, theoretical_price, executable_price)
         if action == "BUY" and fill.filled_quantity > 0:
             position = ShadowPosition(
                 symbol=symbol,
@@ -163,7 +167,11 @@ class ShadowTradingEngine:
             "action": action,
             "quantity": fill.filled_quantity,
             "price": fill.average_price,
+            "theoretical_price": theoretical_price,
+            "executable_price": executable_price,
             "slippage_pct": fill.slippage_pct,
+            "slippage_bps": slippage_bps,
+            "price_impact": round(executable_price - theoretical_price, 8) if executable_price and theoretical_price else 0.0,
             "levels_consumed": fill.levels_consumed,
             "remaining_quantity": fill.remaining_quantity,
             "strategy_id": strategy_id,
@@ -185,6 +193,23 @@ class ShadowTradingEngine:
         except Exception:
             return 0.0
         return 0.0
+
+    def _theoretical_price(self, order_book: dict[str, Any] | None, action: str) -> float:
+        side = str(action or "").upper()
+        levels = (order_book or {}).get("asks" if side == "BUY" else "bids", [])
+        if not levels:
+            return 0.0
+        try:
+            return float(levels[0][0] or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _slippage_bps(self, action: str, theoretical_price: float, executable_price: float) -> float:
+        if theoretical_price <= 0 or executable_price <= 0:
+            return 0.0
+        if str(action or "").upper() == "BUY":
+            return round(max((executable_price - theoretical_price) / theoretical_price * 10_000, 0.0), 8)
+        return round(max((theoretical_price - executable_price) / theoretical_price * 10_000, 0.0), 8)
 
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
@@ -224,7 +249,11 @@ class ShadowTradingEngine:
                     action TEXT NOT NULL,
                     quantity REAL DEFAULT 0,
                     price REAL DEFAULT 0,
+                    theoretical_price REAL DEFAULT 0,
+                    executable_price REAL DEFAULT 0,
                     slippage_pct REAL DEFAULT 0,
+                    slippage_bps REAL DEFAULT 0,
+                    price_impact REAL DEFAULT 0,
                     levels_consumed INTEGER DEFAULT 0,
                     remaining_quantity REAL DEFAULT 0,
                     strategy_id TEXT DEFAULT '',
@@ -235,6 +264,22 @@ class ShadowTradingEngine:
                     ON shadow_trade_logs(symbol, timestamp DESC);
                 """
             )
+            self._ensure_shadow_trade_columns(conn)
+
+    def _ensure_shadow_trade_columns(self, conn: sqlite3.Connection) -> None:
+        existing = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(shadow_trade_logs)").fetchall()
+        }
+        columns = {
+            "theoretical_price": "REAL DEFAULT 0",
+            "executable_price": "REAL DEFAULT 0",
+            "slippage_bps": "REAL DEFAULT 0",
+            "price_impact": "REAL DEFAULT 0",
+        }
+        for name, definition in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE shadow_trade_logs ADD COLUMN {name} {definition}")
 
     def _load_state(self) -> None:
         with self._connect() as conn:
@@ -248,7 +293,8 @@ class ShadowTradingEngine:
             ).fetchall()
             log_rows = conn.execute(
                 """
-                SELECT timestamp, symbol, action, quantity, price, slippage_pct, levels_consumed,
+                SELECT timestamp, symbol, action, quantity, price, theoretical_price,
+                       executable_price, slippage_pct, slippage_bps, price_impact, levels_consumed,
                        remaining_quantity, strategy_id, orderbook_available
                 FROM shadow_trade_logs
                 ORDER BY log_id DESC
@@ -277,7 +323,11 @@ class ShadowTradingEngine:
                 "action": str(row["action"] or ""),
                 "quantity": float(row["quantity"] or 0),
                 "price": float(row["price"] or 0),
+                "theoretical_price": float(row["theoretical_price"] or 0),
+                "executable_price": float(row["executable_price"] or 0),
                 "slippage_pct": float(row["slippage_pct"] or 0),
+                "slippage_bps": float(row["slippage_bps"] or 0),
+                "price_impact": float(row["price_impact"] or 0),
                 "levels_consumed": int(row["levels_consumed"] or 0),
                 "remaining_quantity": float(row["remaining_quantity"] or 0),
                 "strategy_id": str(row["strategy_id"] or ""),
@@ -322,9 +372,10 @@ class ShadowTradingEngine:
             conn.execute(
                 """
                 INSERT INTO shadow_trade_logs
-                    (timestamp, symbol, action, quantity, price, slippage_pct, levels_consumed,
+                    (timestamp, symbol, action, quantity, price, theoretical_price, executable_price,
+                     slippage_pct, slippage_bps, price_impact, levels_consumed,
                      remaining_quantity, strategy_id, orderbook_available, details_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(record.get("timestamp", "")),
@@ -332,7 +383,11 @@ class ShadowTradingEngine:
                     str(record.get("action", "")),
                     float(record.get("quantity", 0) or 0),
                     float(record.get("price", 0) or 0),
+                    float(record.get("theoretical_price", 0) or 0),
+                    float(record.get("executable_price", 0) or 0),
                     float(record.get("slippage_pct", 0) or 0),
+                    float(record.get("slippage_bps", 0) or 0),
+                    float(record.get("price_impact", 0) or 0),
                     int(record.get("levels_consumed", 0) or 0),
                     float(record.get("remaining_quantity", 0) or 0),
                     str(record.get("strategy_id", "")),

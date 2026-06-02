@@ -1,4 +1,4 @@
-"""凭据与环境变量辅助工具。"""
+"""Credential and environment variable helper utilities."""
 
 import os
 import re
@@ -7,9 +7,10 @@ from typing import Any
 
 
 class CredentialManager:
-    """凭据管理器。
+    """Local credential manager.
 
-    加密功能依赖 cryptography；如果未安装，只有环境变量解析功能可用。
+    Encryption depends on cryptography. If cryptography is not installed, only
+    environment placeholder resolution is available.
     """
 
     def __init__(self, key_file: str = ".secret.key"):
@@ -30,7 +31,7 @@ class CredentialManager:
         try:
             from cryptography.fernet import Fernet
         except ImportError as e:
-            raise ImportError("请先安装 cryptography: pip install cryptography") from e
+            raise ImportError("Please install cryptography first: pip install cryptography") from e
 
         if self.key_file.exists():
             key = self.key_file.read_bytes()

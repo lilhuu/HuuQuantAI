@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi.testclient import TestClient
 
 from api.dependencies import get_current_user, get_crypto_service
@@ -5,6 +7,11 @@ from api.main import app
 from api.services.crypto_service import CryptoService
 from core.auto_trading_engine import AutoTradingEngine
 from core.crypto_market_data_provider import CryptoMarketDataProvider
+
+
+class _FakeStrategyResult:
+    def model_dump(self):
+        return {"signals": [], "winners": [], "summary": []}
 
 
 def test_auto_trading_blocks_real_switch_and_builds_buy_decision():
@@ -36,6 +43,8 @@ def test_auto_trading_blocks_real_switch_and_builds_buy_decision():
     assert decisions[0]["status"] == "ready"
     assert decisions[0]["quantity"] == 0.02
     assert decisions[0]["notional"] == 1000
+    assert [step["name"] for step in decisions[0]["steps"]][-1] == "submit"
+    assert all(step["status"] == "pass" for step in decisions[0]["steps"])
 
 
 def test_auto_trading_skips_duplicate_buy_and_short_sell():
@@ -58,6 +67,49 @@ def test_auto_trading_skips_duplicate_buy_and_short_sell():
     )[0]
     assert sell_decision["status"] == "skipped"
     assert "short selling disabled" in sell_decision["message"]
+
+
+def test_auto_trading_daily_loss_triggers_kill_switch_and_cooldown():
+    engine = AutoTradingEngine(
+        {
+            "symbols": ["BTC/USDT"],
+            "max_daily_loss": 100,
+            "cooldown_minutes": 15,
+            "confidence_threshold": 0.1,
+        }
+    )
+    engine.start()
+    engine.build_order_decisions({"summary": []}, {"equity": 10_000, "cash": 10_000}, [])
+
+    decisions = engine.build_order_decisions(
+        {"summary": [{"symbol": "BTC/USDT", "action": "BUY", "price": 50_000, "confidence": 0.9}]},
+        {"equity": 9_850, "cash": 9_850, "available_cash": 9_850},
+        [],
+    )
+
+    status = engine.status()
+    assert status["state"] == "paused"
+    assert status["risk_state"]["kill_switch_active"] is True
+    assert status["risk_state"]["daily_pnl"] == -150
+    assert decisions[0]["status"] == "skipped"
+    assert decisions[0]["steps"][-1]["name"] == "risk_cooldown"
+    assert decisions[0]["steps"][-1]["status"] == "fail"
+
+
+def test_auto_trading_consecutive_losses_trigger_kill_switch():
+    engine = AutoTradingEngine({"max_consecutive_losses": 2, "cooldown_minutes": 10})
+    engine.start()
+
+    engine.record_order_result({}, {"status": "filled", "realized_pnl": -1})
+    assert engine.status()["risk_state"]["consecutive_losses"] == 1
+    assert engine.status()["risk_state"]["kill_switch_active"] is False
+
+    engine.record_order_result({}, {"status": "filled", "realized_pnl": -2})
+    status = engine.status()
+    assert status["state"] == "paused"
+    assert status["risk_state"]["consecutive_losses"] == 2
+    assert status["risk_state"]["kill_switch_active"] is True
+    assert "consecutive losses" in status["risk_state"]["reason"]
 
 
 def test_auto_trading_api_status_config_and_scan(monkeypatch, tmp_path):
@@ -134,3 +186,52 @@ def test_auto_trading_api_status_config_and_scan(monkeypatch, tmp_path):
     finally:
         app.dependency_overrides.clear()
         get_crypto_service.cache_clear()
+
+
+def test_auto_trading_background_loop_start_and_pause(tmp_path):
+    async def scenario():
+        service = CryptoService(
+            {
+                "crypto": {"exchange": "binance", "symbols": ["BTC/USDT"]},
+                "auto_trading": {"symbols": ["BTC/USDT"], "scan_interval_seconds": 5},
+                "storage": {"db_path": str(tmp_path / "loop.db")},
+            }
+        )
+
+        async def fake_run_strategies(_request):
+            return _FakeStrategyResult()
+
+        service.run_strategies = fake_run_strategies
+        started = await service.start_auto_trading()
+        assert started.state == "running"
+        assert started.loop_running is True
+        assert started.next_run_at
+
+        await asyncio.sleep(0.02)
+        assert service.auto_trading_engine.status()["cycle_count"] >= 1
+
+        paused = await service.pause_auto_trading()
+        assert paused.state == "paused"
+        assert paused.loop_running is False
+        assert paused.next_run_at == ""
+
+    asyncio.run(scenario())
+
+
+def test_auto_trading_scan_lock_skips_overlapping_cycle(tmp_path):
+    async def scenario():
+        service = CryptoService(
+            {
+                "crypto": {"exchange": "binance", "symbols": ["BTC/USDT"]},
+                "auto_trading": {"symbols": ["BTC/USDT"]},
+                "storage": {"db_path": str(tmp_path / "lock.db")},
+            }
+        )
+
+        async with service._auto_scan_lock:
+            status = await service.run_auto_trading_cycle()
+
+        assert status.cycle_count == 0
+        assert any(log.event == "scan_skipped_locked" for log in status.logs)
+
+    asyncio.run(scenario())

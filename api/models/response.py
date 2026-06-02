@@ -2,7 +2,7 @@
 
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class MessageResponse(BaseModel):
@@ -322,6 +322,7 @@ class AutoTradingDecisionResponse(BaseModel):
     status: str = "skipped"
     message: str = ""
     place_orders: bool = False
+    steps: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class AutoTradingLogResponse(BaseModel):
@@ -348,7 +349,11 @@ class AutoTradingStatusResponse(BaseModel):
     order_count: int = 0
     last_decisions: list[AutoTradingDecisionResponse] = Field(default_factory=list)
     logs: list[AutoTradingLogResponse] = Field(default_factory=list)
+    risk_state: dict[str, Any] = Field(default_factory=dict)
     real_trading_enabled: bool = False
+    loop_running: bool = False
+    next_run_at: str = ""
+    last_error_type: str = ""
 
 
 class AutoTradingLogsResponse(BaseModel):
@@ -366,7 +371,11 @@ class CryptoShadowTradeResponse(BaseModel):
     action: str = ""
     quantity: float = 0.0
     price: float = 0.0
+    theoretical_price: float = 0.0
+    executable_price: float = 0.0
     slippage_pct: float = 0.0
+    slippage_bps: float = 0.0
+    price_impact: float = 0.0
     levels_consumed: int = 0
     remaining_quantity: float = 0.0
     strategy_id: str = ""
@@ -488,10 +497,15 @@ class PortfolioEquityCurvePointResponse(BaseModel):
 class PortfolioReturnsResponse(BaseModel):
     """Portfolio return analytics response."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     mode: str = "demo"
     range: str = "30d"
     request_key: str = ""
     generated_at: float = 0.0
+    source_status: str = "fresh"
+    cache_time: float = Field(default=0.0, alias="_cache_time")
+    cache_ttl: float = Field(default=20.0, alias="_cache_ttl")
     capital_base: float = 0.0
     capital_base_source: str = "none"
     summary: PortfolioReturnSummaryResponse = Field(default_factory=PortfolioReturnSummaryResponse)
@@ -634,6 +648,9 @@ class CryptoStrategySignalResponse(BaseModel):
     timestamp: str = ""
     indicators: dict[str, float] = Field(default_factory=dict)
     regime_score: float = 0.0
+    blocked: bool = False
+    block_reason: str = ""
+    macro_gate_state: str = ""
 
 
 class CryptoStrategySummaryResponse(BaseModel):

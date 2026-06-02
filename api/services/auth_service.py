@@ -25,6 +25,9 @@ class AuthService:
         self.storage = AppStateStore(storage_path)
         self.session_hours = max(int(session_hours), 1)
         self._lock = threading.RLock()
+        self._login_failures: dict[str, dict[str, Any]] = {}
+        self._max_login_failures = 5
+        self._lockout_minutes = 5
 
     def get_status(self, token: Optional[str] = None) -> AuthStatusResponse:
         user = self.authenticate_token(token) if token else None
@@ -52,16 +55,20 @@ class AuthService:
 
     def login(self, username: str, password: str) -> AuthSessionResponse:
         with self._lock:
+            self._check_login_rate_limit(username)
             user = self.storage.get_user_by_username(username)
             if not user:
+                self._record_login_failure(username)
                 raise ValueError("用户名或密码错误。")
             if not bool(user.get("is_active", 1)):
                 raise ValueError("当前账户已被停用。")
 
             password_hash = self._hash_password(password, user["password_salt"])
             if not hmac.compare_digest(password_hash, str(user["password_hash"])):
+                self._record_login_failure(username)
                 raise ValueError("用户名或密码错误。")
 
+            self._clear_login_failures(username)
             return self._issue_session(user)
 
     def logout(self, token: str) -> None:
@@ -138,6 +145,34 @@ class AuthService:
 
     def _hash_token(self, token: str) -> str:
         return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    def _login_key(self, username: str) -> str:
+        return str(username or "").strip().lower()
+
+    def _check_login_rate_limit(self, username: str) -> None:
+        key = self._login_key(username)
+        if not key:
+            return
+        item = self._login_failures.get(key)
+        if not item:
+            return
+        blocked_until = item.get("blocked_until")
+        if isinstance(blocked_until, datetime) and blocked_until > datetime.now():
+            raise ValueError("登录尝试过于频繁，请稍后再试。")
+        if isinstance(blocked_until, datetime) and blocked_until <= datetime.now():
+            self._login_failures.pop(key, None)
+
+    def _record_login_failure(self, username: str) -> None:
+        key = self._login_key(username)
+        if not key:
+            return
+        item = self._login_failures.setdefault(key, {"count": 0, "blocked_until": None})
+        item["count"] = int(item.get("count") or 0) + 1
+        if item["count"] >= self._max_login_failures:
+            item["blocked_until"] = datetime.now() + timedelta(minutes=self._lockout_minutes)
+
+    def _clear_login_failures(self, username: str) -> None:
+        self._login_failures.pop(self._login_key(username), None)
 
     def _parse_datetime(self, value: Any) -> Optional[datetime]:
         if value is None:

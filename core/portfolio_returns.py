@@ -7,6 +7,9 @@ normalized history rows. It intentionally does not contact a live exchange.
 
 from __future__ import annotations
 
+import copy
+import hashlib
+import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from statistics import fmean
@@ -16,6 +19,10 @@ from typing import Any, Callable, Literal
 PortfolioReturnMode = Literal["live", "demo", "shadow"]
 PortfolioReturnRange = Literal["7d", "30d", "90d", "all"]
 PortfolioReturnSource = Literal["exchange_bill", "local_trade", "shadow"]
+PortfolioReturnCacheStatus = Literal["fresh", "stale", "expired"]
+PORTFOLIO_CACHE_FRESH_SECONDS = 20
+PORTFOLIO_CACHE_STALE_SECONDS = 600
+_PORTFOLIO_ANALYTICS_CACHE: dict[str, tuple[float, "PortfolioReturnAnalytics"]] = {}
 
 
 @dataclass
@@ -119,6 +126,9 @@ class PortfolioReturnAnalytics:
     capital_base: float
     capital_base_source: str
     summary: PortfolioReturnSummary
+    source_status: PortfolioReturnCacheStatus = "fresh"
+    _cache_time: float = 0.0
+    _cache_ttl: float = float(PORTFOLIO_CACHE_FRESH_SECONDS)
     equity_curve: list[EquityCurvePoint] = field(default_factory=list)
     by_symbol: list[PortfolioReturnGroup] = field(default_factory=list)
     by_strategy: list[PortfolioReturnGroup] = field(default_factory=list)
@@ -130,6 +140,9 @@ class PortfolioReturnAnalytics:
             "range": self.range,
             "request_key": self.request_key,
             "generated_at": self.generated_at,
+            "source_status": self.source_status,
+            "_cache_time": self._cache_time,
+            "_cache_ttl": self._cache_ttl,
             "capital_base": self.capital_base,
             "capital_base_source": self.capital_base_source,
             "summary": self.summary.to_dict(),
@@ -259,12 +272,28 @@ def build_portfolio_return_analytics(
     shadow_orders: list[dict[str, Any]] | None = None,
     capital_base: float = 0.0,
     limit: int = 200,
+    cache_ttl: int = PORTFOLIO_CACHE_FRESH_SECONDS,
+    stale_ttl: int = PORTFOLIO_CACHE_STALE_SECONDS,
 ) -> PortfolioReturnAnalytics:
     """Build summary, curve, grouping, and history for portfolio returns."""
     safe_mode: PortfolioReturnMode = mode if mode in {"live", "demo", "shadow"} else "demo"  # type: ignore[assignment]
     safe_range: PortfolioReturnRange = range if range in {"7d", "30d", "90d", "all"} else "30d"  # type: ignore[assignment]
     safe_limit = max(1, min(int(limit or 200), 1000))
     now = _now_ts()
+    safe_cache_ttl = max(1, int(cache_ttl or PORTFOLIO_CACHE_FRESH_SECONDS))
+    safe_stale_ttl = max(safe_cache_ttl, int(stale_ttl or PORTFOLIO_CACHE_STALE_SECONDS))
+    cache_key = _portfolio_cache_key(safe_mode, safe_range, trades or [], shadow_orders or [], capital_base, safe_limit)
+    cached = _PORTFOLIO_ANALYTICS_CACHE.get(cache_key)
+    if cached:
+        cache_time, cached_analytics = cached
+        age = now - cache_time
+        if age <= safe_stale_ttl:
+            result = copy.deepcopy(cached_analytics)
+            result.source_status = "fresh" if age <= safe_cache_ttl else "stale"
+            result.generated_at = now
+            result._cache_time = cache_time
+            result._cache_ttl = float(safe_cache_ttl)
+            return result
     start_at = _range_start(safe_range, now)
 
     rows: list[PortfolioReturnRow] = []
@@ -323,7 +352,7 @@ def build_portfolio_return_analytics(
         avg_hold_minutes=round(fmean([row.hold_minutes or 0.0 for row in hold_rows]), 8) if hold_rows else 0.0,
     )
 
-    return PortfolioReturnAnalytics(
+    analytics = PortfolioReturnAnalytics(
         mode=safe_mode,
         range=safe_range,
         request_key=f"{safe_mode}:{safe_range}:{safe_limit}",
@@ -331,11 +360,39 @@ def build_portfolio_return_analytics(
         capital_base=round(float(capital_base or 0.0), 8),
         capital_base_source=capital_source,
         summary=summary,
+        source_status="expired" if cached else "fresh",
+        _cache_time=now,
+        _cache_ttl=float(safe_cache_ttl),
         equity_curve=equity_curve,
         by_symbol=_group_rows(history, lambda row: row.symbol),
-        by_strategy=_group_rows(history, lambda row: row.strategy_id or "未分类"),
+        by_strategy=_group_rows(history, lambda row: row.strategy_id or "unclassified"),
         history=history,
     )
+    _PORTFOLIO_ANALYTICS_CACHE[cache_key] = (now, copy.deepcopy(analytics))
+    if len(_PORTFOLIO_ANALYTICS_CACHE) > 128:
+        oldest_key = min(_PORTFOLIO_ANALYTICS_CACHE, key=lambda key: _PORTFOLIO_ANALYTICS_CACHE[key][0])
+        _PORTFOLIO_ANALYTICS_CACHE.pop(oldest_key, None)
+    return analytics
+
+
+def _portfolio_cache_key(
+    mode: PortfolioReturnMode,
+    range: PortfolioReturnRange,
+    trades: list[dict[str, Any]],
+    shadow_orders: list[dict[str, Any]],
+    capital_base: float,
+    limit: int,
+) -> str:
+    payload = {
+        "mode": mode,
+        "range": range,
+        "trades": trades,
+        "shadow_orders": shadow_orders,
+        "capital_base": capital_base,
+        "limit": limit,
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _as_float(row: dict[str, Any], *keys: str) -> float | None:
@@ -473,7 +530,7 @@ def _profit_factor(rows: list[PortfolioReturnRow]) -> float:
 def _group_rows(rows: list[PortfolioReturnRow], key_fn: Callable[[PortfolioReturnRow], str]) -> list[PortfolioReturnGroup]:
     grouped: dict[str, list[PortfolioReturnRow]] = {}
     for row in rows:
-        grouped.setdefault(key_fn(row) or "未分类", []).append(row)
+        grouped.setdefault(key_fn(row) or "unclassified", []).append(row)
 
     result: list[PortfolioReturnGroup] = []
     for key, items in grouped.items():

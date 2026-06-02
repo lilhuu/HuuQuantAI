@@ -1,4 +1,9 @@
-from core.portfolio_returns import build_portfolio_return_analytics, normalize_shadow_row, normalize_trade_row
+from core.portfolio_returns import (
+    _PORTFOLIO_ANALYTICS_CACHE,
+    build_portfolio_return_analytics,
+    normalize_shadow_row,
+    normalize_trade_row,
+)
 
 
 def test_portfolio_returns_summarizes_local_trades():
@@ -80,3 +85,53 @@ def test_shadow_row_estimates_unrealized_pnl_from_mark_price():
     assert row.unrealized_pnl == 1
     assert row.trade_roi_pct == 10
     assert row.is_estimated is True
+
+
+def test_portfolio_returns_cache_reports_fresh_and_stale_status():
+    _PORTFOLIO_ANALYTICS_CACHE.clear()
+    rows = [
+        {
+            "trade_id": "cache_1",
+            "symbol": "BTC/USDT",
+            "side": "SELL",
+            "status": "closed",
+            "closed_at": "2026-05-01T00:00:00+00:00",
+            "realized_pnl": 10,
+            "quantity": 0.01,
+            "price": 65000,
+        }
+    ]
+
+    first = build_portfolio_return_analytics("demo", "all", trades=rows, capital_base=10_000, cache_ttl=60)
+    second = build_portfolio_return_analytics("demo", "all", trades=rows, capital_base=10_000, cache_ttl=60)
+
+    assert first.source_status == "fresh"
+    assert second.source_status == "fresh"
+    assert second._cache_time == first._cache_time
+
+    key = next(iter(_PORTFOLIO_ANALYTICS_CACHE))
+    cache_time, cached_value = _PORTFOLIO_ANALYTICS_CACHE[key]
+    _PORTFOLIO_ANALYTICS_CACHE[key] = (cache_time - 30, cached_value)
+
+    stale = build_portfolio_return_analytics(
+        "demo",
+        "all",
+        trades=rows,
+        capital_base=10_000,
+        cache_ttl=20,
+        stale_ttl=600,
+    )
+    assert stale.source_status == "stale"
+    assert stale._cache_time == cache_time - 30
+
+    _PORTFOLIO_ANALYTICS_CACHE[key] = (cache_time - 1_000, cached_value)
+    expired = build_portfolio_return_analytics(
+        "demo",
+        "all",
+        trades=rows,
+        capital_base=10_000,
+        cache_ttl=20,
+        stale_ttl=60,
+    )
+    assert expired.source_status == "expired"
+    assert expired._cache_time > cache_time - 1_000

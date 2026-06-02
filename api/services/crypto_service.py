@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
 import os
 import time
 from typing import Any, Optional
@@ -147,6 +149,8 @@ class CryptoService:
         self.ai_config = AiAdvisorConfig.from_dict(self.config.get("ai", {}) or {})
         self.ai_advisor = AiSignalAdvisor(self.ai_config)
         self.ai_store = AiSignalStore(storage_config.get("ai_signals_db_path") or sqlite_storage_path)
+        self._auto_scan_lock = asyncio.Lock()
+        self._auto_loop_task: asyncio.Task | None = None
 
     async def get_quotes(self, symbols: Optional[list[str]] = None) -> CryptoQuotesResponse:
         target_symbols = self._normalize_symbols(symbols or self.default_symbols)
@@ -381,17 +385,36 @@ class CryptoService:
         return AutoTradingStatusResponse(**status)
 
     async def start_auto_trading(self) -> AutoTradingStatusResponse:
-        self.auto_trading_engine.start()
-        return await self.run_auto_trading_cycle()
+        status = self.auto_trading_engine.start()
+        if status.get("state") == "running":
+            self._ensure_auto_loop()
+        return AutoTradingStatusResponse(**self.auto_trading_engine.status())
 
     async def pause_auto_trading(self) -> AutoTradingStatusResponse:
-        return AutoTradingStatusResponse(**self.auto_trading_engine.pause())
+        self.auto_trading_engine.pause()
+        await self._stop_auto_loop()
+        return AutoTradingStatusResponse(**self.auto_trading_engine.status())
 
     async def stop_auto_trading(self) -> AutoTradingStatusResponse:
-        return AutoTradingStatusResponse(**self.auto_trading_engine.stop())
+        self.auto_trading_engine.stop()
+        await self._stop_auto_loop()
+        return AutoTradingStatusResponse(**self.auto_trading_engine.status())
 
     async def run_auto_trading_cycle(self) -> AutoTradingStatusResponse:
         """Run one automatic strategy scan and paper-order pass."""
+        if self._auto_scan_lock.locked():
+            self.auto_trading_engine._log(
+                "WARNING",
+                "scan_skipped_locked",
+                "auto trading scan skipped because another scan is running",
+            )
+            return AutoTradingStatusResponse(**self.auto_trading_engine.status())
+
+        async with self._auto_scan_lock:
+            return await self._run_auto_trading_cycle_locked()
+
+    async def _run_auto_trading_cycle_locked(self) -> AutoTradingStatusResponse:
+        """Run one scan while the caller holds the scan lock."""
         config = self.auto_trading_engine.config
         place_orders = self.auto_trading_engine.state == "running" and config.enabled
         try:
@@ -425,10 +448,60 @@ class CryptoService:
                     order_type="LIMIT",
                 )
                 self.auto_trading_engine.record_order_result(decision, order.to_response())
+            self.auto_trading_engine.last_error_type = ""
+            return AutoTradingStatusResponse(**self.auto_trading_engine.status())
+        except ApiError as exc:
+            error_code = ""
+            if isinstance(exc.detail, dict):
+                error_code = str(exc.detail.get("error_code") or "")
+            self.auto_trading_engine.record_error(
+                str(exc.detail.get("message") if isinstance(exc.detail, dict) else exc),
+                {"type": exc.__class__.__name__, "error_code": error_code},
+            )
             return AutoTradingStatusResponse(**self.auto_trading_engine.status())
         except Exception as exc:
             self.auto_trading_engine.record_error(str(exc), {"type": exc.__class__.__name__})
             return AutoTradingStatusResponse(**self.auto_trading_engine.status())
+
+    def _ensure_auto_loop(self) -> None:
+        if self._auto_loop_task is not None and not self._auto_loop_task.done():
+            return
+        self.auto_trading_engine.mark_loop(running=True, next_run_at=datetime.now(timezone.utc).isoformat())
+        self._auto_loop_task = asyncio.create_task(self._auto_trading_loop())
+
+    async def _stop_auto_loop(self) -> None:
+        task = self._auto_loop_task
+        self._auto_loop_task = None
+        self.auto_trading_engine.mark_loop(running=False)
+        if task is None or task.done():
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    async def _auto_trading_loop(self) -> None:
+        self.auto_trading_engine.mark_loop(running=True, next_run_at=datetime.now(timezone.utc).isoformat())
+        try:
+            while self.auto_trading_engine.state == "running" and self.auto_trading_engine.config.enabled:
+                async with self._auto_scan_lock:
+                    await self._run_auto_trading_cycle_locked()
+
+                if self.auto_trading_engine.state != "running" or not self.auto_trading_engine.config.enabled:
+                    break
+
+                interval = max(5, min(int(self.auto_trading_engine.config.scan_interval_seconds or 30), 3600))
+                next_run = datetime.now(timezone.utc) + timedelta(seconds=interval)
+                self.auto_trading_engine.mark_loop(running=True, next_run_at=next_run.isoformat())
+                await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self.auto_trading_engine.record_error(str(exc), {"type": exc.__class__.__name__, "source": "auto_loop"})
+        finally:
+            if self.auto_trading_engine.state != "running" or not self.auto_trading_engine.config.enabled:
+                self.auto_trading_engine.mark_loop(running=False)
 
     async def get_auto_trading_logs(self, limit: int = 100) -> AutoTradingLogsResponse:
         logs = self.auto_trading_engine.get_logs(limit)

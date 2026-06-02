@@ -16,6 +16,9 @@ const DEFAULT_CONFIG = {
   max_order_notional: 1000,
   min_order_notional: 10,
   confidence_threshold: 0.35,
+  max_daily_loss: 0,
+  max_consecutive_losses: 0,
+  cooldown_minutes: 30,
   real_trading_enabled: false,
   strategies: [
     {
@@ -37,8 +40,44 @@ const DEFAULT_CONFIG = {
   ],
 };
 
-function normalizeConfig(config = {}) {
-  const merged = { ...DEFAULT_CONFIG, ...config };
+/**
+ * @typedef {Object} AutoStrategyConfig
+ * @property {string} strategy_id
+ * @property {string} type
+ * @property {string[]} symbols
+ * @property {number} weight
+ * @property {boolean} enabled
+ * @property {Record<string, unknown>} parameters
+ */
+
+/**
+ * @typedef {Object} AutoTradingConfig
+ * @property {boolean} enabled
+ * @property {"paper"} mode
+ * @property {string[]} symbols
+ * @property {string} period
+ * @property {string[]} timeframes
+ * @property {number} scan_interval_seconds
+ * @property {number} max_positions
+ * @property {number} per_trade_position_ratio
+ * @property {number} max_order_notional
+ * @property {number} min_order_notional
+ * @property {number} confidence_threshold
+ * @property {number} max_daily_loss
+ * @property {number} max_consecutive_losses
+ * @property {number} cooldown_minutes
+ * @property {boolean} real_trading_enabled
+ * @property {AutoStrategyConfig[]} strategies
+ */
+
+/**
+ * Normalize server or draft auto-trading config into a paper-only safe shape.
+ *
+ * @param {Record<string, unknown>} [config]
+ * @returns {AutoTradingConfig}
+ */
+export function normalizeConfig(config = {}) {
+  const merged = /** @type {AutoTradingConfig} */ ({ ...DEFAULT_CONFIG, ...config });
   const symbols = Array.isArray(merged.symbols)
     ? merged.symbols.map((item) => normalizeCryptoSymbol(item)).filter(Boolean)
     : DEFAULT_CONFIG.symbols;
@@ -60,6 +99,9 @@ export const useAutoTradingStore = defineStore("auto-trading", () => {
   const enabled = computed(() => Boolean(status.value?.enabled));
   const decisions = computed(() => status.value?.last_decisions || []);
   const logs = computed(() => status.value?.logs || []);
+  const loopRunning = computed(() => Boolean(status.value?.loop_running));
+  const nextRunAt = computed(() => status.value?.next_run_at || "");
+  const lastErrorType = computed(() => status.value?.last_error_type || "");
   const stateLabel = computed(() => {
     const labels = {
       running: "运行中",
@@ -171,6 +213,9 @@ export const useAutoTradingStore = defineStore("auto-trading", () => {
     enabled,
     decisions,
     logs,
+    loopRunning,
+    nextRunAt,
+    lastErrorType,
     stateLabel,
     fetchStatus,
     saveConfig,

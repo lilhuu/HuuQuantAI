@@ -45,6 +45,9 @@ def test_shadow_position_created_and_removed():
     engine = ShadowTradingEngine(FakeProvider())
     buy = engine.execute_shadow_trade("BTC/USDT", "BUY", 1, "unit")
     assert buy["orderbook_available"] is True
+    assert buy["theoretical_price"] == 100
+    assert buy["executable_price"] == buy["price"]
+    assert buy["slippage_bps"] == 0
     assert engine.get_positions()[0]["symbol"] == "BTC/USDT"
 
     engine.execute_shadow_trade("BTC/USDT", "SELL", 1, "unit")
@@ -61,6 +64,9 @@ def test_shadow_fallback_to_fixed_slippage():
 
     assert trade["orderbook_available"] is False
     assert trade["price"] == 100.05
+    assert trade["theoretical_price"] == 100
+    assert trade["executable_price"] == 100.05
+    assert trade["slippage_bps"] == 5
 
 
 def test_shadow_state_persists_to_sqlite(tmp_path):
@@ -73,3 +79,15 @@ def test_shadow_state_persists_to_sqlite(tmp_path):
     assert restored.get_positions()[0]["symbol"] == "BTC/USDT"
     assert restored.get_positions()[0]["stop_loss_price"] == 90
     assert restored.trade_log[-1]["strategy_id"] == "unit"
+    assert restored.trade_log[-1]["theoretical_price"] == 100
+    assert restored.trade_log[-1]["executable_price"] == 100
+
+
+def test_shadow_large_order_records_execution_quality():
+    engine = ShadowTradingEngine(FakeProvider())
+    trade = engine.execute_shadow_trade("BTC/USDT", "BUY", 2.5, "impact")
+
+    assert trade["theoretical_price"] == 100
+    assert trade["executable_price"] == 100.6
+    assert trade["price_impact"] == 0.6
+    assert trade["slippage_bps"] == 60
