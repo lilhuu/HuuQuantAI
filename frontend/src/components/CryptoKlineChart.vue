@@ -43,6 +43,28 @@ function toChartTime(value, fallbackIndex) {
   return Math.floor(Date.now() / 1000) + fallbackIndex;
 }
 
+function chartTimeToDate(time) {
+  if (typeof time === "number") {
+    return new Date(time * 1000);
+  }
+  if (time && typeof time === "object" && "year" in time) {
+    return new Date(Date.UTC(Number(time.year), Number(time.month || 1) - 1, Number(time.day || 1)));
+  }
+  return null;
+}
+
+function formatChartTime(time) {
+  const date = chartTimeToDate(time);
+  if (!date || Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${month}-${day} ${hours}:${minutes}`;
+}
+
 function movingAverage(rows, period) {
   const result = [];
   for (let index = period - 1; index < rows.length; index += 1) {
@@ -64,7 +86,15 @@ function renderChart() {
         horzLines: { color: "rgba(154, 176, 198, 0.08)" },
       },
       rightPriceScale: { borderColor: "rgba(154, 176, 198, 0.16)" },
-      timeScale: { borderColor: "rgba(154, 176, 198, 0.16)", timeVisible: true },
+      timeScale: {
+        borderColor: "rgba(154, 176, 198, 0.28)",
+        timeVisible: true,
+        secondsVisible: false,
+        tickMarkFormatter: formatChartTime,
+      },
+      localization: {
+        timeFormatter: formatChartTime,
+      },
       crosshair: { mode: 1 },
     });
     candleSeries = chart.addSeries(CandlestickSeries, {
@@ -86,7 +116,10 @@ function renderChart() {
     ma99Series = chart.addSeries(LineSeries, { color: "#b178ff", lineWidth: 1 });
     resizeObserver = new ResizeObserver(() => {
       if (chart && chartEl.value) {
-        chart.applyOptions({ width: chartEl.value.clientWidth, height: props.height });
+        chart.applyOptions({
+          width: chartEl.value.clientWidth,
+          height: props.height,
+        });
       }
     });
     resizeObserver.observe(chartEl.value);

@@ -1489,6 +1489,13 @@ th {
   background: rgba(7, 18, 33, 0.96);
 }
 
+.chart-surface--kline {
+  height: auto;
+  min-height: 380px;
+  overflow: visible;
+  background: #111318;
+}
+
 .chart-surface svg {
   width: 100%;
   height: 100%;

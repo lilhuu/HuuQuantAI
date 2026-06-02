@@ -220,7 +220,7 @@ async function loadOrderBook() {
         </div>
       </div>
 
-      <div class="chart-surface">
+      <div class="chart-surface chart-surface--kline">
         <CryptoKlineChart :candles="candles" :height="380" />
       </div>
     </article>
