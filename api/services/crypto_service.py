@@ -51,6 +51,8 @@ from api.models.response import (
     CryptoShadowTradeResponse,
     CryptoQuoteResponse,
     CryptoQuotesResponse,
+    CryptoSymbolInfoResponse,
+    CryptoSymbolListResponse,
     CryptoStrategyBacktestResponse,
     CryptoStrategyBacktestResultResponse,
     ConflictResolutionDetailResponse,
@@ -152,26 +154,87 @@ class CryptoService:
         self._auto_scan_lock = asyncio.Lock()
         self._auto_loop_task: asyncio.Task | None = None
 
-    async def get_quotes(self, symbols: Optional[list[str]] = None) -> CryptoQuotesResponse:
-        target_symbols = self._normalize_symbols(symbols or self.default_symbols)
-        if not target_symbols:
+    async def get_quotes(
+        self,
+        symbols: Optional[list[str]] = None,
+        search: str | None = None,
+        quote: str | None = None,
+        limit: int = 0,
+        offset: int = 0,
+    ) -> CryptoQuotesResponse:
+        target_symbols = self._normalize_symbols(symbols) if symbols else None
+        if target_symbols is not None and len(target_symbols) == 0:
             return CryptoQuotesResponse(items=[], count=0, source="ccxt")
+
         try:
-            rows = self.provider.fetch_quotes(target_symbols)
+            if target_symbols:
+                rows = self.provider.fetch_quotes(target_symbols)
+            else:
+                rows = self.provider.fetch_all_tickers(quote=quote)
             self.record_quote_snapshots(rows)
         except Exception as exc:
-            cached_rows = self.market_cache.get_quotes(target_symbols)
-            if cached_rows:
-                items = [CryptoQuoteResponse(**row) for row in cached_rows]
-                return CryptoQuotesResponse(items=items, count=len(items), source="cache_binance")
+            if target_symbols:
+                cached_rows = self.market_cache.get_quotes(target_symbols)
+                if cached_rows:
+                    items = [CryptoQuoteResponse(**row) for row in cached_rows]
+                    return CryptoQuotesResponse(items=items, count=len(items), source="cache_binance")
             raise ApiError(
                 503,
                 f"Crypto market data source unavailable and no local cache is available: {exc}",
                 ErrorCode.INTERNAL_SERVER_ERROR,
             ) from exc
+
+        if search:
+            search_upper = search.strip().upper()
+            rows = [r for r in rows if search_upper in str(r.get("symbol", "")).upper() or search_upper in str(r.get("symbol", "")).upper()]
+
+        total = len(rows)
+        safe_offset = max(int(offset or 0), 0)
+        safe_limit = max(int(limit or 0), 0)
+        if safe_limit > 0:
+            rows = rows[safe_offset : safe_offset + safe_limit]
+
         items = [CryptoQuoteResponse(**row) for row in rows]
         source = rows[0].get("source", "ccxt") if rows else "ccxt"
-        return CryptoQuotesResponse(items=items, count=len(items), source=str(source))
+        return CryptoQuotesResponse(
+            items=items,
+            count=len(items),
+            total=total,
+            limit=safe_limit,
+            offset=safe_offset,
+            source=str(source),
+        )
+
+    async def get_available_symbols(
+        self,
+        quote: str | None = None,
+        search: str | None = None,
+        status: str = "active",
+        limit: int = 100,
+        offset: int = 0,
+    ) -> CryptoSymbolListResponse:
+        items, total = self.market_cache.get_symbols(
+            quote=quote, search=search, status=status, limit=limit, offset=offset
+        )
+        if total == 0:
+            try:
+                markets = await asyncio.get_event_loop().run_in_executor(
+                    None, self.provider.load_markets, False
+                )
+            except Exception:
+                markets = self.provider.load_markets(reload=False)
+            if markets:
+                self.market_cache.upsert_exchange_info(markets)
+                items, total = self.market_cache.get_symbols(
+                    quote=quote, search=search, status=status, limit=limit, offset=offset
+                )
+        return CryptoSymbolListResponse(
+            items=[CryptoSymbolInfoResponse(**item) for item in items],
+            count=len(items),
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
 
     async def get_klines(self, symbol: str, period: str = "1h", limit: int = 200) -> CryptoKLinesResponse:
         normalized_symbol = normalize_crypto_symbol(symbol, self.crypto_config.get("default_quote_currency", "USDT"))

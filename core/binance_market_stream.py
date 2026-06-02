@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
 
@@ -13,6 +14,8 @@ from core.crypto_market_data_provider import SUPPORTED_TIMEFRAMES, normalize_cry
 
 
 BINANCE_SPOT_WS_BASE = "wss://stream.binance.com:9443/stream"
+MINI_TICKER_SYMBOL_THRESHOLD = 50
+MINI_TICKER_THROTTLE_SECONDS = 2.0
 
 
 def build_binance_stream_url(
@@ -20,8 +23,13 @@ def build_binance_stream_url(
     period: str = "1h",
     depth_limit: int = 20,
     selected_symbol: Optional[str] = None,
-) -> str:
-    """Build a Binance combined stream URL for ticker, one kline, and one depth stream."""
+) -> tuple[str, bool]:
+    """Build a Binance combined stream URL and whether miniTicker mode is active.
+
+    Returns (url, use_mini_ticker).
+    When symbols exceed MINI_TICKER_SYMBOL_THRESHOLD, uses !miniTicker@arr
+    instead of individual @ticker streams.
+    """
     normalized_symbols = _unique_symbols(symbols)
     primary = normalize_crypto_symbol(selected_symbol) if selected_symbol else ""
     if not primary or primary not in normalized_symbols:
@@ -29,14 +37,19 @@ def build_binance_stream_url(
 
     normalized_period = SUPPORTED_TIMEFRAMES.get(str(period or "1h"), "1h")
     normalized_depth = 5 if depth_limit <= 5 else 10 if depth_limit <= 10 else 20
+    use_mini_ticker = len(normalized_symbols) >= MINI_TICKER_SYMBOL_THRESHOLD
+
     streams = []
-    for symbol in normalized_symbols or [primary]:
-        stream_symbol = _binance_symbol(symbol)
-        streams.append(f"{stream_symbol}@ticker")
+    if use_mini_ticker:
+        streams.append("!miniTicker@arr")
+    else:
+        for symbol in normalized_symbols or [primary]:
+            stream_symbol = _binance_symbol(symbol)
+            streams.append(f"{stream_symbol}@ticker")
     primary_stream_symbol = _binance_symbol(primary)
     streams.append(f"{primary_stream_symbol}@kline_{normalized_period}")
     streams.append(f"{primary_stream_symbol}@depth{normalized_depth}@1000ms")
-    return f"{BINANCE_SPOT_WS_BASE}?streams={'/'.join(streams)}"
+    return f"{BINANCE_SPOT_WS_BASE}?streams={'/'.join(streams)}", use_mini_ticker
 
 
 def normalize_binance_stream_message(raw_payload: str | dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -67,6 +80,46 @@ def normalize_binance_stream_message(raw_payload: str | dict[str, Any]) -> Optio
     if "b" in data and "a" in data and "@depth" in stream:
         return {"type": "crypto_depth", "item": normalize_binance_depth(data, stream)}
     return None
+
+
+def normalize_mini_ticker_message(raw_payload: str | dict[str, Any]) -> Optional[dict[str, Any]]:
+    """Parse a !miniTicker@arr message, returning None if it is not a miniTicker payload."""
+    if isinstance(raw_payload, str):
+        payload = json.loads(raw_payload)
+    else:
+        payload = raw_payload
+    if not isinstance(payload, dict):
+        return None
+    data = payload.get("data")
+    if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+        items = [_normalize_mini_ticker_item(item) for item in data]
+        return {"type": "crypto_ticker_batch", "items": [item for item in items if item]}
+    return None
+
+
+def _normalize_mini_ticker_item(item: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """Convert a single miniTicker array element to our standard ticker shape."""
+    symbol = _symbol_from_binance(item.get("s"))
+    if not symbol:
+        return None
+    price = _float(item.get("c"))
+    open_price = _float(item.get("o"))
+    change_amount = price - open_price if open_price > 0 else 0.0
+    return {
+        "symbol": symbol,
+        "price": price,
+        "open": open_price,
+        "high": _float(item.get("h")),
+        "low": _float(item.get("l")),
+        "volume": _float(item.get("v")),
+        "amount": _float(item.get("q")),
+        "change": (change_amount / open_price) if open_price > 0 else 0.0,
+        "change_amount": change_amount,
+        "bid": 0.0,
+        "ask": 0.0,
+        "timestamp": _iso_from_ms(item.get("E")),
+        "source": "binance_ws_mini",
+    }
 
 
 def normalize_binance_ticker(data: dict[str, Any]) -> dict[str, Any]:
@@ -174,10 +227,14 @@ async def stream_binance_market(
 
     normalized_symbols = _unique_symbols(symbols) or ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
     selected = normalize_crypto_symbol(selected_symbol) or normalized_symbols[0]
+    use_mini_ticker = len(normalized_symbols) >= MINI_TICKER_SYMBOL_THRESHOLD
     reconnect_attempt = 0
+    last_mini_ticker_send = 0.0
     while True:
         reconnect_attempt += 1
-        url = build_binance_stream_url(normalized_symbols, period=period, depth_limit=depth_limit, selected_symbol=selected)
+        url, _ = build_binance_stream_url(
+            normalized_symbols, period=period, depth_limit=depth_limit, selected_symbol=selected
+        )
         await websocket.send_json(
             {
                 "type": "crypto_status",
@@ -198,6 +255,19 @@ async def stream_binance_market(
                     }
                 )
                 async for raw in upstream:
+                    if use_mini_ticker:
+                        batch = normalize_mini_ticker_message(raw)
+                        if batch and batch.get("type") == "crypto_ticker_batch":
+                            now = time.monotonic()
+                            if now - last_mini_ticker_send >= MINI_TICKER_THROTTLE_SECONDS:
+                                last_mini_ticker_send = now
+                                for item in batch["items"]:
+                                    await websocket.send_json({"type": "crypto_ticker", "item": item})
+                                try:
+                                    service.record_quote_snapshots(batch["items"])
+                                except Exception:
+                                    pass
+                            continue
                     message = normalize_binance_stream_message(raw)
                     if not message:
                         continue
@@ -208,7 +278,7 @@ async def stream_binance_market(
                     await websocket.send_json(message)
         except Exception as exc:
             await websocket.send_json(_error_message(f"Binance 实时行情不可用: {exc}"))
-            delay = min(30, 2**min(reconnect_attempt, 5))
+            delay = min(30, 2 ** min(reconnect_attempt, 5))
             await websocket.send_json(
                 {
                     "type": "crypto_status",

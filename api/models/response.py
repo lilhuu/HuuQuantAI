@@ -79,7 +79,32 @@ class CryptoQuotesResponse(BaseModel):
 
     items: list[CryptoQuoteResponse] = Field(default_factory=list)
     count: int = 0
+    total: int = 0
+    limit: int = 0
+    offset: int = 0
     source: str = "ccxt"
+
+
+class CryptoSymbolInfoResponse(BaseModel):
+    """Trading pair metadata from exchange info."""
+
+    symbol: str
+    base: str = ""
+    quote: str = ""
+    status: str = "active"
+    price_precision: int | None = 0
+    quantity_precision: int | None = 0
+    min_notional: float | None = 0.0
+
+
+class CryptoSymbolListResponse(BaseModel):
+    """Paginated list of available trading pairs."""
+
+    items: list[CryptoSymbolInfoResponse] = Field(default_factory=list)
+    count: int = 0
+    total: int = 0
+    limit: int = 100
+    offset: int = 0
 
 
 class CryptoKLineResponse(BaseModel):
@@ -745,6 +770,7 @@ class ConnectionHealthResponse(BaseModel):
     """Exchange connection health response."""
 
     quotes: ConnectionEndpointHealthResponse = Field(default_factory=ConnectionEndpointHealthResponse)
+    all_tickers: ConnectionEndpointHealthResponse = Field(default_factory=ConnectionEndpointHealthResponse)
     ohlcv: ConnectionEndpointHealthResponse = Field(default_factory=ConnectionEndpointHealthResponse)
     orderbook: ConnectionEndpointHealthResponse = Field(default_factory=ConnectionEndpointHealthResponse)
 

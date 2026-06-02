@@ -57,16 +57,69 @@ class CryptoMarketDataProvider:
             retryable_exceptions=retryable,
         )
         self._quotes_breaker = CircuitBreaker(CircuitBreakerConfig(failure_threshold=3, recovery_timeout_seconds=10))
+        self._all_tickers_breaker = CircuitBreaker(CircuitBreakerConfig(failure_threshold=3, recovery_timeout_seconds=30))
         self._ohlcv_breaker = CircuitBreaker(CircuitBreakerConfig(failure_threshold=5, recovery_timeout_seconds=15))
         self._orderbook_breaker = CircuitBreaker(CircuitBreakerConfig(failure_threshold=3, recovery_timeout_seconds=10))
+        self._batch_threshold = int(self.config.get("batch_ticker_threshold", 20) or 20)
 
     def fetch_quotes(self, symbols: Iterable[str]) -> List[Dict[str, Any]]:
+        symbol_list = list(symbols)
+        if len(symbol_list) >= self._batch_threshold:
+            return retry_call(
+                self._fetch_quotes_from_all_tickers,
+                symbol_list,
+                config=self._retry_config,
+                circuit_breaker=self._all_tickers_breaker,
+            )
         return retry_call(
             self._raw_fetch_quotes,
-            list(symbols),
+            symbol_list,
             config=self._retry_config,
             circuit_breaker=self._quotes_breaker,
         )
+
+    def fetch_all_tickers(self, quote: str | None = None) -> List[Dict[str, Any]]:
+        """Fetch all tickers from the exchange in a single batch call.
+
+        Args:
+            quote: optional quote currency filter (e.g. 'USDT'). When None,
+                   returns ALL tickers from the exchange.
+        """
+        return retry_call(
+            self._raw_fetch_all_tickers,
+            quote,
+            config=self._retry_config,
+            circuit_breaker=self._all_tickers_breaker,
+        )
+
+    def _fetch_quotes_from_all_tickers(self, symbols: list[str]) -> List[Dict[str, Any]]:
+        """Batch path: fetch all tickers then filter to requested symbols."""
+        all_tickers = self._raw_fetch_all_tickers(quote=None)
+        ticker_by_symbol = {item["symbol"]: item for item in all_tickers}
+        results: List[Dict[str, Any]] = []
+        for raw_symbol in symbols:
+            symbol = normalize_crypto_symbol(raw_symbol, self.default_quote_currency)
+            if not symbol:
+                continue
+            if symbol in ticker_by_symbol:
+                results.append(ticker_by_symbol[symbol])
+        return results
+
+    def _raw_fetch_all_tickers(self, quote: str | None = None) -> List[Dict[str, Any]]:
+        """Fetch all tickers from the exchange (single API call)."""
+        exchange = self._get_exchange()
+        raw_tickers = exchange.fetch_tickers()
+        items: List[Dict[str, Any]] = []
+        target_quote = normalize_crypto_symbol(quote or "", self.default_quote_currency).split("/")[-1] if quote else None
+        for raw_symbol, ticker in (raw_tickers or {}).items():
+            symbol = normalize_crypto_symbol(raw_symbol, self.default_quote_currency)
+            if not symbol:
+                continue
+            if target_quote and not symbol.upper().endswith(f"/{target_quote.upper()}"):
+                continue
+            items.append(self._normalize_ticker(symbol, ticker))
+        items.sort(key=lambda item: item["symbol"])
+        return items
 
     def _raw_fetch_quotes(self, symbols: Iterable[str]) -> List[Dict[str, Any]]:
         exchange = self._get_exchange()
@@ -187,16 +240,48 @@ class CryptoMarketDataProvider:
             )
         return items
 
+    def load_markets(self, reload: bool = False) -> list[dict[str, Any]]:
+        """Fetch all spot market info, filtered to USDT quote pairs.
+
+        Returns a list of market metadata dicts containing symbol, base, quote,
+        status, precision, and min_notional for each trading pair.
+        """
+        exchange = self._get_exchange()
+        markets = exchange.load_markets(reload)
+        items: list[dict[str, Any]] = []
+        quote_currency = self.default_quote_currency.upper()
+        for raw_symbol, market in (markets or {}).items():
+            symbol = normalize_crypto_symbol(raw_symbol, self.default_quote_currency)
+            if not symbol or not symbol.upper().endswith(f"/{quote_currency}"):
+                continue
+            if market.get("type") != "spot":
+                continue
+            items.append(
+                {
+                    "symbol": symbol,
+                    "base": str(market.get("base") or "").upper(),
+                    "quote": str(market.get("quote") or "").upper(),
+                    "status": "active" if market.get("active") else "inactive",
+                    "price_precision": int(market.get("precision", {}).get("price", 0) or 0),
+                    "quantity_precision": int(market.get("precision", {}).get("amount", 0) or 0),
+                    "min_notional": float(market.get("limits", {}).get("cost", {}).get("min", 0) or 0),
+                }
+            )
+        items.sort(key=lambda item: item["symbol"])
+        return items
+
     def get_connection_health(self) -> dict[str, Any]:
         """Return retry/circuit-breaker state for the public exchange endpoints."""
         return {
             "quotes": self._quotes_breaker.health(),
+            "all_tickers": self._all_tickers_breaker.health(),
             "ohlcv": self._ohlcv_breaker.health(),
             "orderbook": self._orderbook_breaker.health(),
         }
 
     def reset_all_breakers(self) -> None:
         self._quotes_breaker.reset()
+        self._all_tickers_breaker.reset()
         self._ohlcv_breaker.reset()
         self._orderbook_breaker.reset()
 

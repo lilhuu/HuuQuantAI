@@ -809,6 +809,21 @@ th {
   color: var(--text);
 }
 
+.pagination-info {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.sortable-header {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s;
+}
+
+.sortable-header:hover {
+  color: var(--accent);
+}
+
 @keyframes skeletonSweep {
   100% {
     transform: translateX(100%);

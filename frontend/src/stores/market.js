@@ -1,4 +1,4 @@
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 
 import { apiClient } from "../lib/api";
@@ -56,6 +56,17 @@ export const useMarketStore = defineStore("trading-market", () => {
   const orderBookLoading = ref(false);
   const marketSocketActive = ref(false);
 
+  const cryptoSymbols = ref([]);
+  const symbolTotal = ref(0);
+  const symbolLoading = ref(false);
+  const quoteSearch = ref("");
+  const quoteFilter = ref("USDT");
+  const quoteSortField = ref("volume");
+  const quoteSortDir = ref("desc");
+  const quotePage = ref(1);
+  const quotePageSize = ref(50);
+  const quotesTotal = ref(0);
+
   const marketSocket = createReconnectingSocket({
     createSocket: (options) => createCryptoSocket(options),
     onStateChange: (state) => {
@@ -71,18 +82,63 @@ export const useMarketStore = defineStore("trading-market", () => {
     },
   });
 
-  async function fetchCryptoQuotes(symbols = cryptoWatchSymbols.value) {
-    const normalizedSymbols = uniqueSymbols(symbols);
+  const filteredSortedQuotes = computed(() => {
+    let result = [...cryptoQuotes.value];
+    if (quoteSearch.value) {
+      const q = quoteSearch.value.trim().toUpperCase();
+      result = result.filter((item) => (item.symbol || "").toUpperCase().includes(q));
+    }
+    if (quoteFilter.value) {
+      const f = quoteFilter.value.toUpperCase();
+      result = result.filter((item) => (item.symbol || "").toUpperCase().endsWith("/" + f));
+    }
+    const field = quoteSortField.value || "volume";
+    const dir = quoteSortDir.value === "asc" ? 1 : -1;
+    result.sort((a, b) => {
+      const aVal = field === "symbol" ? (a.symbol || "") : Number(a[field] || 0);
+      const bVal = field === "symbol" ? (b.symbol || "") : Number(b[field] || 0);
+      if (field === "symbol") return dir * aVal.localeCompare(bVal);
+      return dir * (bVal - aVal);
+    });
+    quotesTotal.value = result.length;
+    return result;
+  });
+
+  const paginatedQuotes = computed(() => {
+    const start = (quotePage.value - 1) * quotePageSize.value;
+    return filteredSortedQuotes.value.slice(start, start + quotePageSize.value);
+  });
+
+  const totalPages = computed(() => Math.max(1, Math.ceil(quotesTotal.value / quotePageSize.value)));
+
+  async function fetchCryptoSymbols({ quote, search, limit = 500, offset = 0 } = {}) {
+    symbolLoading.value = true;
+    try {
+      const { data } = await apiClient.get("/crypto/symbols", { params: { quote, search, limit, offset } });
+      cryptoSymbols.value = data.items || [];
+      symbolTotal.value = data.total || 0;
+      return data;
+    } finally {
+      symbolLoading.value = false;
+    }
+  }
+
+  async function fetchCryptoQuotes(symbols = null, { search, quote, limit, offset } = {}) {
+    const normalizedSymbols = symbols ? uniqueSymbols(symbols) : null;
     const params = {};
-    if (normalizedSymbols.length) {
+    if (normalizedSymbols && normalizedSymbols.length) {
       params.symbols = normalizedSymbols.join(",");
     }
+    if (search) params.search = search;
+    if (quote) params.quote = quote;
+    if (limit != null) params.limit = limit;
+    if (offset != null) params.offset = offset;
 
     cryptoLoading.value = true;
     try {
       const { data } = await apiClient.get("/crypto/quotes", { params });
       cryptoQuotes.value = [...(data.items || [])].sort((left, right) => left.symbol.localeCompare(right.symbol));
-      if (normalizedSymbols.length) {
+      if (normalizedSymbols && normalizedSymbols.length) {
         cryptoWatchSymbols.value = normalizedSymbols;
       }
       if (data.source === "cache_binance") {
@@ -304,6 +360,21 @@ export const useMarketStore = defineStore("trading-market", () => {
     marketSocketState,
     marketStatusMessage,
     lastMarketMessageAt,
+    marketSocketActive,
+    cryptoSymbols,
+    symbolTotal,
+    symbolLoading,
+    quoteSearch,
+    quoteFilter,
+    quoteSortField,
+    quoteSortDir,
+    quotePage,
+    quotePageSize,
+    quotesTotal,
+    filteredSortedQuotes,
+    paginatedQuotes,
+    totalPages,
+    fetchCryptoSymbols,
     fetchCryptoQuotes,
     fetchCryptoKlines,
     fetchCryptoOrderBook,

@@ -111,6 +111,103 @@ class CryptoMarketCache:
             for row in rows
         ]
 
+    def upsert_exchange_info(self, rows: list[dict[str, Any]]) -> None:
+        if not self._ready or not rows:
+            return
+        now = datetime.now().isoformat()
+        payload = []
+        for row in rows:
+            symbol = normalize_crypto_symbol(row.get("symbol"))
+            if not symbol:
+                continue
+            payload.append(
+                (
+                    symbol,
+                    str(row.get("base") or "").upper(),
+                    str(row.get("quote") or "").upper(),
+                    str(row.get("status") or "active"),
+                    int(row.get("price_precision") or 0),
+                    int(row.get("quantity_precision") or 0),
+                    self._float(row.get("min_notional")),
+                    now,
+                )
+            )
+        if not payload:
+            return
+        with self._lock, self._connect() as conn:
+            conn.executemany(
+                """
+                INSERT INTO crypto_exchange_info
+                    (symbol, base, quote, status, price_precision, quantity_precision, min_notional, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(symbol) DO UPDATE SET
+                    base = excluded.base,
+                    quote = excluded.quote,
+                    status = excluded.status,
+                    price_precision = excluded.price_precision,
+                    quantity_precision = excluded.quantity_precision,
+                    min_notional = excluded.min_notional,
+                    updated_at = excluded.updated_at
+                """,
+                payload,
+            )
+
+    def get_symbols(
+        self,
+        quote: str | None = None,
+        search: str | None = None,
+        status: str = "active",
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Paginated symbol list with optional quote and search filters."""
+        if not self._ready:
+            return [], 0
+        safe_limit = max(1, min(int(limit or 100), 500))
+        safe_offset = max(int(offset or 0), 0)
+        conditions: list[str] = []
+        params: list[Any] = []
+        if status:
+            conditions.append("status = ?")
+            params.append(str(status))
+        if quote:
+            conditions.append("quote = ?")
+            params.append(str(quote).upper())
+        if search:
+            conditions.append("(symbol LIKE ? OR base LIKE ?)")
+            pattern = f"%{str(search).upper()}%"
+            params.extend([pattern, pattern])
+        where = " AND ".join(conditions) if conditions else "1=1"
+        with self._lock, self._connect() as conn:
+            total_row = conn.execute(
+                f"SELECT COUNT(*) AS cnt FROM crypto_exchange_info WHERE {where}",
+                params,
+            ).fetchone()
+            total = int(total_row["cnt"]) if total_row else 0
+            rows = conn.execute(
+                f"""
+                SELECT symbol, base, quote, status, price_precision, quantity_precision, min_notional
+                FROM crypto_exchange_info
+                WHERE {where}
+                ORDER BY symbol
+                LIMIT ? OFFSET ?
+                """,
+                [*params, safe_limit, safe_offset],
+            ).fetchall()
+        items = [
+            {
+                "symbol": str(row["symbol"]),
+                "base": str(row["base"]),
+                "quote": str(row["quote"]),
+                "status": str(row["status"]),
+                "price_precision": int(row["price_precision"] or 0),
+                "quantity_precision": int(row["quantity_precision"] or 0),
+                "min_notional": self._float(row["min_notional"]),
+            }
+            for row in rows
+        ]
+        return items, total
+
     def upsert_klines(self, rows: Iterable[dict[str, Any]]) -> None:
         if not self._ready:
             return
@@ -209,6 +306,7 @@ class CryptoMarketCache:
             path.parent.mkdir(parents=True, exist_ok=True)
             self.storage_path = str(path)
             with self._connect() as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
                 conn.executescript(
                     """
                     CREATE TABLE IF NOT EXISTS crypto_quotes_snapshot (
@@ -245,6 +343,20 @@ class CryptoMarketCache:
                     );
                     CREATE INDEX IF NOT EXISTS idx_crypto_klines_symbol_period_time
                         ON crypto_klines(symbol, period, start_time);
+                    CREATE TABLE IF NOT EXISTS crypto_exchange_info (
+                        symbol TEXT PRIMARY KEY,
+                        base TEXT NOT NULL,
+                        quote TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'active',
+                        price_precision INTEGER DEFAULT 0,
+                        quantity_precision INTEGER DEFAULT 0,
+                        min_notional REAL DEFAULT 0.0,
+                        updated_at TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_crypto_exchange_info_quote
+                        ON crypto_exchange_info(quote);
+                    CREATE INDEX IF NOT EXISTS idx_crypto_exchange_info_base
+                        ON crypto_exchange_info(base);
                     """
                 )
             self._ready = True

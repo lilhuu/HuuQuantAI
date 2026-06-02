@@ -37,6 +37,8 @@ from api.models.response import (
     CryptoPaperOrderResponse,
     CryptoPaperPositionsResponse,
     CryptoQuotesResponse,
+    CryptoSymbolInfoResponse,
+    CryptoSymbolListResponse,
     CryptoShadowLogsResponse,
     CryptoShadowPositionsResponse,
     CryptoShadowTradeResponse,
@@ -65,9 +67,25 @@ def _parse_symbols(symbols: str | None) -> list[str] | None:
 @router.get("/quotes", response_model=CryptoQuotesResponse, summary="Get crypto quotes")
 async def get_crypto_quotes(
     symbols: str | None = Query(default=None, description="Comma-separated symbols, for example BTC/USDT,ETH/USDT."),
+    search: str | None = Query(default=None, description="Search by symbol or base asset."),
+    quote: str | None = Query(default=None, description="Quote currency filter, e.g. USDT."),
+    limit: int = Query(default=0, ge=0, le=500, description="Page size. 0 returns all."),
+    offset: int = Query(default=0, ge=0, description="Page offset."),
     service: CryptoService = Depends(get_crypto_service),
 ) -> CryptoQuotesResponse:
-    return await service.get_quotes(_parse_symbols(symbols))
+    return await service.get_quotes(_parse_symbols(symbols), search=search, quote=quote, limit=limit, offset=offset)
+
+
+@router.get("/symbols", response_model=CryptoSymbolListResponse, summary="List available trading pairs")
+async def get_crypto_symbols(
+    quote: str | None = Query(default=None, description="Quote currency filter, e.g. USDT."),
+    search: str | None = Query(default=None, description="Search by symbol or base asset."),
+    status: str = Query(default="active", description="Symbol status filter."),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    service: CryptoService = Depends(get_crypto_service),
+) -> CryptoSymbolListResponse:
+    return await service.get_available_symbols(quote=quote, search=search, status=status, limit=limit, offset=offset)
 
 
 @router.get("/klines", response_model=CryptoKLinesResponse, summary="Get crypto OHLCV candles")
