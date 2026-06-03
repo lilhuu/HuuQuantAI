@@ -53,6 +53,13 @@ class RegimeResult:
         }
 
 
+@dataclass
+class RegimeDetectorConfig:
+    trend_threshold: float = 0.35
+    trend_multiplier: float = 15.0
+    symbol_trend_multipliers: dict[str, float] = field(default_factory=dict)
+
+
 class RegimeDetector:
     """Detect crypto market state using trend, flow, funding, and risk factors."""
 
@@ -73,8 +80,26 @@ class RegimeDetector:
     FUNDING_DIVISOR = 0.001
     VOLUME_ANOMALY_THRESHOLD = 2.0
 
-    def __init__(self, trend_threshold: float = 0.35) -> None:
-        self.trend_threshold = max(0.05, min(0.95, float(trend_threshold or 0.35)))
+    def __init__(
+        self,
+        trend_threshold: float = 0.35,
+        *,
+        trend_multiplier: float | None = None,
+        symbol_trend_multipliers: dict[str, float] | None = None,
+        config: dict[str, Any] | RegimeDetectorConfig | None = None,
+    ) -> None:
+        if isinstance(config, RegimeDetectorConfig):
+            cfg = config
+        else:
+            payload = dict(config or {})
+            cfg = RegimeDetectorConfig(
+                trend_threshold=float(payload.get("trend_threshold", trend_threshold) or trend_threshold),
+                trend_multiplier=float(payload.get("trend_multiplier", trend_multiplier or self.TREND_MULTIPLIER) or self.TREND_MULTIPLIER),
+                symbol_trend_multipliers=dict(payload.get("symbol_trend_multipliers") or symbol_trend_multipliers or {}),
+            )
+        self.trend_threshold = max(0.05, min(0.95, float(cfg.trend_threshold or 0.35)))
+        self.trend_multiplier = max(0.1, float(cfg.trend_multiplier or self.TREND_MULTIPLIER))
+        self.symbol_trend_multipliers = {str(key).upper(): max(0.1, float(value)) for key, value in cfg.symbol_trend_multipliers.items()}
 
     def detect(
         self,
@@ -87,6 +112,7 @@ class RegimeDetector:
         orderbook_ask_depth: float | None = None,
         open_interest_current: float | None = None,
         open_interest_previous: float | None = None,
+        symbol: str | None = None,
     ) -> RegimeResult:
         """Compute a market regime from available factors."""
 
@@ -111,6 +137,7 @@ class RegimeDetector:
             orderbook_ask_depth,
             open_interest_current,
             open_interest_previous,
+            symbol,
         )
         score = self._compute_score(features)
         regime = self._classify(score, features.volatility_spike)
@@ -135,9 +162,10 @@ class RegimeDetector:
         ask_depth: float | None,
         oi_current: float | None,
         oi_previous: float | None,
+        symbol: str | None,
     ) -> RegimeFeatures:
         return RegimeFeatures(
-            trend_strength=self._calc_trend_strength(closes),
+            trend_strength=self._calc_trend_strength(closes, symbol=symbol),
             momentum=self._calc_momentum(closes),
             volume_anomaly=self._calc_volume_anomaly(volumes),
             orderbook_imbalance=self._calc_orderbook_imbalance(bid_depth, ask_depth),
@@ -146,7 +174,7 @@ class RegimeDetector:
             oi_change=self._calc_oi_change(oi_current, oi_previous),
         )
 
-    def _calc_trend_strength(self, closes: list[float]) -> float:
+    def _calc_trend_strength(self, closes: list[float], *, symbol: str | None = None) -> float:
         if len(closes) < 40:
             return 0.0
         previous = sum(closes[-40:-20]) / 20
@@ -154,7 +182,17 @@ class RegimeDetector:
         if previous == 0:
             return 0.0
         slope = (recent - previous) / previous
-        return self._clamp(slope * self.TREND_MULTIPLIER, -1.0, 1.0)
+        return self._clamp(slope * self._trend_multiplier_for(symbol), -1.0, 1.0)
+
+    def _trend_multiplier_for(self, symbol: str | None) -> float:
+        if symbol:
+            normalized = str(symbol).upper()
+            if normalized in self.symbol_trend_multipliers:
+                return self.symbol_trend_multipliers[normalized]
+            base = normalized.split("/", 1)[0]
+            if base in self.symbol_trend_multipliers:
+                return self.symbol_trend_multipliers[base]
+        return self.trend_multiplier
 
     def _calc_momentum(self, closes: list[float]) -> float:
         if len(closes) < 5 or closes[-5] == 0:

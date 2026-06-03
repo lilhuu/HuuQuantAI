@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, watch } from "vue";
+import { computed, onBeforeUnmount, onErrorCaptured, onMounted, watch } from "vue";
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 
 import { useAuthStore } from "./stores/auth";
@@ -96,6 +96,11 @@ async function logout() {
 function handleUserInteraction() {
   store.primeAlertAudio();
 }
+
+onErrorCaptured((error, _instance, info) => {
+  store.setError(error, `界面组件异常：${info || "未知位置"}`);
+  return false;
+});
 
 onMounted(async () => {
   window.addEventListener("pointerdown", handleUserInteraction, { passive: true });

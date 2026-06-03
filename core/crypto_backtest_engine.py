@@ -82,8 +82,8 @@ class CryptoBacktestEngine:
                 candles = market_data.get(symbol, [])
                 if index >= len(candles):
                     continue
-                window = candles[: index + 1]
-                current = window[-1]
+                history_window = candles[: index + 1]
+                current = history_window[-1]
                 timestamp = timestamp or self._timestamp(current, index)
                 price = self._float(current.get("close", current.get("price")))
                 if price <= 0:
@@ -96,7 +96,8 @@ class CryptoBacktestEngine:
                     trades.append(intrabar_trade)
                     continue
 
-                signal = self.strategy_engine.evaluate_strategy(config, symbol, window)
+                signal_window = self._strategy_window(config, candles, index)
+                signal = self.strategy_engine.evaluate_strategy(config, symbol, signal_window)
                 if not signal or signal.action == "HOLD":
                     reason = signal.reason if signal else "insufficient indicators or no signal"
                     category = categorize_no_entry_reason(config.type, reason)
@@ -106,7 +107,7 @@ class CryptoBacktestEngine:
                 if signal.action == "BUY":
                     current_risk = self.risk_sizer.calculate_total_risk(list(positions.values()))
                     equity = cash + self._market_value(positions, last_prices)
-                    trade = self._buy(config, symbol, price, cash, position, index, timestamp, signal.reason, window, equity, current_risk)
+                    trade = self._buy(config, symbol, price, cash, position, index, timestamp, signal.reason, history_window, equity, current_risk)
                     if trade:
                         cash = float(trade["cash_after"])
                         trades.append(trade)
@@ -237,6 +238,24 @@ class CryptoBacktestEngine:
             "take_profit_price": take_profit_price,
             "slippage_cost": abs(fill_price - price) * quantity,
         }
+
+    def _strategy_window(self, config: StrategyConfig, candles: list[dict[str, Any]], index: int) -> list[dict[str, Any]]:
+        params = config.parameters
+        if config.type == "bollinger":
+            lookback = int(params.get("period", 20) or 20)
+        elif config.type == "dual_ma":
+            lookback = int(params.get("slow_period", 26) or 26) + 1
+        elif config.type == "momentum":
+            lookback = int(params.get("lookback_period", 20) or 20) + 1
+        elif config.type == "rsi":
+            lookback = int(params.get("period", params.get("rsi_period", 14)) or 14) + 1
+        elif config.type == "macd":
+            lookback = int(params.get("slow_period", 26) or 26) + int(params.get("signal_period", 9) or 9) + 5
+        else:
+            lookback = index + 1
+        safe_lookback = max(1, min(int(lookback or 1), index + 1))
+        start = max(0, index + 1 - safe_lookback)
+        return candles[start : index + 1]
 
     def _sell(
         self,

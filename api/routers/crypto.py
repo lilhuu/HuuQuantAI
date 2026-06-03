@@ -1,6 +1,9 @@
 """Crypto-only market data and paper-trading endpoints."""
 
-from fastapi import APIRouter, Depends, Query
+from collections import defaultdict, deque
+from time import monotonic
+
+from fastapi import APIRouter, Depends, Query, Request
 
 from api.dependencies import get_crypto_service
 from api.error_codes import ApiError, ErrorCode
@@ -55,6 +58,9 @@ from api.services.crypto_service import CryptoService
 
 
 router = APIRouter(prefix="/crypto", tags=["crypto"])
+_MARKET_RATE_LIMIT_WINDOW_SECONDS = 60.0
+_MARKET_RATE_LIMIT_MAX_REQUESTS = 600
+_market_rate_buckets: dict[str, deque[float]] = defaultdict(deque)
 
 
 def _parse_symbols(symbols: str | None) -> list[str] | None:
@@ -64,6 +70,24 @@ def _parse_symbols(symbols: str | None) -> list[str] | None:
     return parsed or None
 
 
+def _rate_limit_market_data(request: Request) -> None:
+    client_host = request.client.host if request.client else "local"
+    key = f"{client_host}:{request.url.path}"
+    now = monotonic()
+    bucket = _market_rate_buckets[key]
+    while bucket and now - bucket[0] > _MARKET_RATE_LIMIT_WINDOW_SECONDS:
+        bucket.popleft()
+    if len(bucket) >= _MARKET_RATE_LIMIT_MAX_REQUESTS:
+        retry_after = max(1, int(_MARKET_RATE_LIMIT_WINDOW_SECONDS - (now - bucket[0])))
+        raise ApiError(
+            429,
+            "Crypto market data rate limit exceeded; please retry later.",
+            ErrorCode.RATE_LIMITED,
+            headers={"Retry-After": str(retry_after)},
+        )
+    bucket.append(now)
+
+
 @router.get("/quotes", response_model=CryptoQuotesResponse, summary="Get crypto quotes")
 async def get_crypto_quotes(
     symbols: str | None = Query(default=None, description="Comma-separated symbols, for example BTC/USDT,ETH/USDT."),
@@ -71,6 +95,7 @@ async def get_crypto_quotes(
     quote: str | None = Query(default=None, description="Quote currency filter, e.g. USDT."),
     limit: int = Query(default=0, ge=0, le=500, description="Page size. 0 returns all."),
     offset: int = Query(default=0, ge=0, description="Page offset."),
+    _: None = Depends(_rate_limit_market_data),
     service: CryptoService = Depends(get_crypto_service),
 ) -> CryptoQuotesResponse:
     return await service.get_quotes(_parse_symbols(symbols), search=search, quote=quote, limit=limit, offset=offset)
@@ -93,6 +118,7 @@ async def get_crypto_klines(
     symbol: str = Query(..., description="Trading pair, for example BTC/USDT."),
     period: str = Query(default="1h", description="Timeframe: 1m, 5m, 15m, 1h, 4h, 1d."),
     limit: int = Query(default=200, ge=1, le=1000, description="Number of candles."),
+    _: None = Depends(_rate_limit_market_data),
     service: CryptoService = Depends(get_crypto_service),
 ) -> CryptoKLinesResponse:
     return await service.get_klines(symbol=symbol, period=period, limit=limit)
@@ -102,6 +128,7 @@ async def get_crypto_klines(
 async def get_crypto_orderbook(
     symbol: str = Query(..., description="Trading pair, for example BTC/USDT."),
     limit: int = Query(default=20, ge=1, le=100, description="Number of price levels per side."),
+    _: None = Depends(_rate_limit_market_data),
     service: CryptoService = Depends(get_crypto_service),
 ) -> CryptoOrderBookResponse:
     return await service.get_orderbook(symbol=symbol, limit=limit)

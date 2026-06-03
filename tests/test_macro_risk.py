@@ -72,6 +72,16 @@ def test_macro_score_all_neutral():
     assert result.state == MacroGateState.ALLOW_FULL
 
 
+def test_macro_risk_thresholds_are_configurable():
+    snapshot = _snapshot(dxy_available=True, dxy_change_30d_pct=1.0)
+
+    default_result = MacroRiskEvaluator().evaluate(snapshot)
+    strict_result = MacroRiskEvaluator({"block_threshold": -0.05, "reduce_threshold": 0.0}).evaluate(snapshot)
+
+    assert default_result.state == MacroGateState.ALLOW_REDUCED
+    assert strict_result.state == MacroGateState.BLOCK_NEW_RISK
+
+
 def test_block_new_risk_when_dxy_up_and_m2_down():
     result = MacroRiskEvaluator().evaluate(
         _snapshot(

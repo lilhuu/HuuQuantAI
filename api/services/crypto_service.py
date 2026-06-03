@@ -145,7 +145,8 @@ class CryptoService:
         self.macro_provider = MacroDataProvider(
             fred_api_key=os.environ.get("FRED_API_KEY") or macro_config.get("fred_api_key")
         )
-        self.macro_evaluator = MacroRiskEvaluator()
+        self.macro_evaluator = MacroRiskEvaluator(macro_config)
+        self.regime_detector_config = dict(crypto_config.get("regime", {}) or {})
         self._macro_cache: MacroOverviewResponse | None = None
         self._macro_cache_time = 0.0
         self.ai_config = AiAdvisorConfig.from_dict(self.config.get("ai", {}) or {})
@@ -297,7 +298,7 @@ class CryptoService:
         limit: int = 100,
     ) -> MarketRegimeBatchResponse:
         """Detect the market regime for one or more crypto symbols."""
-        detector = RegimeDetector()
+        detector = RegimeDetector(config=self.regime_detector_config)
         items: list[MarketRegimeResponse] = []
         market_data = await self._load_strategy_market_data(symbols, period, limit)
 
@@ -345,6 +346,7 @@ class CryptoService:
                 orderbook_ask_depth=orderbook_ask_depth,
                 open_interest_current=open_interest_current,
                 open_interest_previous=None,
+                symbol=symbol,
             )
             items.append(
                 MarketRegimeResponse(
@@ -1140,13 +1142,13 @@ class CryptoService:
     ) -> tuple[dict[str, str], dict[str, float]]:
         regimes: dict[str, str] = {}
         regime_scores: dict[str, float] = {}
-        detector = RegimeDetector()
+        detector = RegimeDetector(config=self.regime_detector_config)
         for symbol, candles in market_data.items():
             closes = [float(row.get("close", 0) or 0) for row in candles]
             highs = [float(row.get("high", 0) or 0) for row in candles]
             lows = [float(row.get("low", 0) or 0) for row in candles]
             volumes = [float(row.get("volume", 0) or 0) for row in candles]
-            result = detector.detect(closes=closes, highs=highs, lows=lows, volumes=volumes)
+            result = detector.detect(closes=closes, highs=highs, lows=lows, volumes=volumes, symbol=symbol)
             regimes[symbol] = result.regime.value
             regime_scores[symbol] = result.score
         return regimes, regime_scores

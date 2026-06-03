@@ -43,6 +43,13 @@ class MacroGateDecision:
         return payload
 
 
+@dataclass
+class MacroRiskConfig:
+    block_threshold: float = -0.30
+    reduce_threshold: float = -0.10
+    risk_on_threshold: float = 0.20
+
+
 class MacroRiskEvaluator:
     """Evaluate macro liquidity and risk signals for crypto trading."""
 
@@ -56,6 +63,17 @@ class MacroRiskEvaluator:
 
     PENALTY_YIELD_INVERSION = 0.10
     PENALTY_GOLD_SURGE = 0.10
+
+    def __init__(self, config: dict[str, Any] | MacroRiskConfig | None = None) -> None:
+        if isinstance(config, MacroRiskConfig):
+            self.config = config
+        else:
+            payload = dict(config or {})
+            self.config = MacroRiskConfig(
+                block_threshold=float(payload.get("block_threshold", self.BLOCK_THRESHOLD) or self.BLOCK_THRESHOLD),
+                reduce_threshold=float(payload.get("reduce_threshold", self.REDUCE_THRESHOLD) or self.REDUCE_THRESHOLD),
+                risk_on_threshold=float(payload.get("risk_on_threshold", self.RISK_ON_THRESHOLD) or self.RISK_ON_THRESHOLD),
+            )
 
     def evaluate(self, snapshot: MacroSnapshot) -> MacroGateDecision:
         score = self._compute_macro_score(snapshot)
@@ -133,9 +151,9 @@ class MacroRiskEvaluator:
             if snapshot.dxy_change_30d_pct > 1.0 and snapshot.m2_change_3m_pct < -1.0:
                 return MacroGateState.BLOCK_NEW_RISK
 
-        if score <= self.BLOCK_THRESHOLD:
+        if score <= self.config.block_threshold:
             return MacroGateState.BLOCK_NEW_RISK
-        if score <= self.REDUCE_THRESHOLD:
+        if score <= self.config.reduce_threshold:
             return MacroGateState.ALLOW_REDUCED
         return MacroGateState.ALLOW_FULL
 

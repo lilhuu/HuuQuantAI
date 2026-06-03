@@ -36,6 +36,16 @@ def test_trend_up_detection():
     assert result.features.trend_strength > 0
 
 
+def test_regime_trend_multiplier_can_be_symbol_specific():
+    closes = [100 + index * 0.05 for index in range(80)]
+    detector = RegimeDetector(config={"trend_multiplier": 10.0, "symbol_trend_multipliers": {"SOL": 25.0}})
+
+    btc = detector.detect(closes=closes, symbol="BTC/USDT")
+    sol = detector.detect(closes=closes, symbol="SOL/USDT")
+
+    assert sol.features.trend_strength > btc.features.trend_strength
+
+
 def test_trend_down_detection():
     closes = [300 - index * 2 for index in range(80)]
     result = RegimeDetector().detect(closes=closes, highs=[v + 1 for v in closes], lows=[v - 1 for v in closes])

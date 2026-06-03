@@ -129,6 +129,27 @@ def test_crypto_paper_broker_uses_wal_and_deduplicates_append_only_rows(tmp_path
         assert conn.execute("SELECT COUNT(*) FROM crypto_paper_positions").fetchone()[0] == 0
 
 
+def test_crypto_paper_broker_prunes_persisted_logs(tmp_path):
+    storage_path = tmp_path / "paper_logs.db"
+    broker = CryptoPaperBrokerExecutor(
+        {
+            "storage_path": str(storage_path),
+            "initial_cash": 10000,
+            "max_order_notional": 5000,
+            "max_position_ratio": 1.0,
+            "partial_fill_enabled": False,
+            "max_log_entries": 20,
+            "max_persisted_log_entries": 3,
+        }
+    )
+
+    for index in range(6):
+        broker.place_order(f"TEST{index}/USDT", "BUY", 1, 100)
+
+    with sqlite3.connect(storage_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM crypto_paper_logs").fetchone()[0] <= 3
+
+
 def test_binance_testnet_executor_credentials_gate_and_dry_run(tmp_path):
     executor = BinanceTestnetExecutor(
         {

@@ -75,6 +75,7 @@ class CryptoPaperBrokerExecutor:
             "quantity_precision": 8,
             "price_precision": 8,
             "max_log_entries": 500,
+            "max_persisted_log_entries": 5000,
             "persistence_enabled": True,
             "storage_path": "",
         }
@@ -879,6 +880,23 @@ class CryptoPaperBrokerExecutor:
                     for item in new_log_items
                 ],
             )
+            self._prune_persisted_logs(conn)
+
+    def _prune_persisted_logs(self, conn: sqlite3.Connection) -> None:
+        max_entries = max(0, int(self.config.get("max_persisted_log_entries", 5000) or 0))
+        if max_entries <= 0:
+            return
+        conn.execute(
+            """
+            DELETE FROM crypto_paper_logs
+            WHERE id NOT IN (
+                SELECT id FROM crypto_paper_logs
+                ORDER BY id DESC
+                LIMIT ?
+            )
+            """,
+            (max_entries,),
+        )
 
     def _parse_datetime(self, value: Any) -> Optional[datetime]:
         if not value:

@@ -40,6 +40,16 @@ crypto:
   macro:
     enabled: true
     fred_api_key: ${FRED_API_KEY}
+    block_threshold: -0.30
+    reduce_threshold: -0.10
+    risk_on_threshold: 0.20
+  regime:
+    trend_threshold: 0.35
+    trend_multiplier: 15.0
+    symbol_trend_multipliers:
+      BTC: 15.0
+      ETH: 18.0
+      SOL: 22.0
 
 risk:
   max_order_notional: 2000

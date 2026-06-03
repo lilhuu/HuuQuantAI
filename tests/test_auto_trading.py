@@ -5,13 +5,37 @@ from fastapi.testclient import TestClient
 from api.dependencies import get_current_user, get_crypto_service
 from api.main import app
 from api.services.crypto_service import CryptoService
-from core.auto_trading_engine import AutoTradingEngine
+from core.auto_trading_engine import AutoTradingEngine, DecisionPipeline
 from core.crypto_market_data_provider import CryptoMarketDataProvider
 
 
 class _FakeStrategyResult:
     def model_dump(self):
         return {"signals": [], "winners": [], "summary": []}
+
+
+def test_decision_pipeline_builds_staged_ready_decision():
+    engine = AutoTradingEngine({"symbols": ["BTC/USDT"], "confidence_threshold": 0.2})
+    pipeline = DecisionPipeline(engine.config, engine.risk_state, cooldown_active=False)
+
+    decision = pipeline.build_one(
+        symbol="BTC/USDT",
+        action="BUY",
+        price=50000,
+        confidence=0.8,
+        strategy_id="rsi",
+        reason="test signal",
+        candidate={},
+        equity=10000,
+        cash=10000,
+        positions={},
+        current_position_count=0,
+        place_orders=True,
+    )
+
+    assert decision["status"] == "ready"
+    assert decision["quantity"] == 0.02
+    assert [step["name"] for step in decision["steps"]][-1] == "submit"
 
 
 def test_auto_trading_blocks_real_switch_and_builds_buy_decision():

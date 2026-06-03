@@ -148,6 +148,149 @@ class RiskState:
         }
 
 
+class DecisionPipeline:
+    """Stage-by-stage paper order decision gate."""
+
+    def __init__(self, config: AutoTradingConfig, risk_state: RiskState, cooldown_active: bool) -> None:
+        self.config = config
+        self.risk_state = risk_state
+        self.cooldown_active = cooldown_active
+
+    def build_one(
+        self,
+        *,
+        symbol: str,
+        action: str,
+        price: float,
+        confidence: float,
+        strategy_id: str,
+        reason: str,
+        candidate: dict[str, Any],
+        equity: float,
+        cash: float,
+        positions: dict[str, dict[str, Any]],
+        current_position_count: int,
+        place_orders: bool,
+    ) -> dict[str, Any]:
+        position = positions.get(symbol) or {}
+        quantity_held = float(position.get("quantity", 0) or 0)
+        steps: list[dict[str, Any]] = []
+        base = {
+            "timestamp": _now(),
+            "symbol": symbol,
+            "action": action,
+            "price": price,
+            "quantity": 0.0,
+            "notional": 0.0,
+            "strategy_id": strategy_id,
+            "confidence": confidence,
+            "reason": reason,
+            "status": "skipped",
+            "message": "",
+            "place_orders": bool(place_orders),
+            "steps": steps,
+        }
+
+        if self.config.real_trading_enabled:
+            base["message"] = "real trading is blocked"
+            steps.append(self._step("real_trading_gate", "fail", base["message"]))
+            return base
+        steps.append(self._step("real_trading_gate", "pass", "paper mode enforced"))
+        if self.cooldown_active:
+            base["message"] = f"risk cooldown active until {self.risk_state.cooldown_until}"
+            steps.append(self._step("risk_cooldown", "fail", base["message"]))
+            return base
+        steps.append(self._step("risk_cooldown", "pass", "no active cooldown"))
+        if self.risk_state.kill_switch_active:
+            base["message"] = self.risk_state.reason or "risk kill switch active"
+            steps.append(self._step("kill_switch", "fail", base["message"]))
+            return base
+        steps.append(self._step("kill_switch", "pass", "kill switch inactive"))
+        if price <= 0:
+            base["message"] = "missing executable price"
+            steps.append(self._step("market_data", "fail", base["message"]))
+            return base
+        steps.append(self._step("market_data", "pass", "executable price available"))
+        if confidence < self.config.confidence_threshold:
+            base["message"] = f"confidence below threshold {self.config.confidence_threshold:.2f}"
+            steps.append(self._step("confidence", "fail", base["message"]))
+            return base
+        steps.append(self._step("confidence", "pass", f"{confidence:.2f} >= {self.config.confidence_threshold:.2f}"))
+        if not place_orders:
+            base["status"] = "simulated"
+            base["message"] = "decision preview only; no paper order sent"
+            steps.append(self._step("submit_mode", "skip", base["message"]))
+        else:
+            steps.append(self._step("submit_mode", "pass", "paper order submission requested"))
+
+        if action == "BUY":
+            self._apply_buy_gates(base, steps, quantity_held, current_position_count, equity, cash, price, candidate)
+        else:
+            self._apply_sell_gates(base, steps, quantity_held, price)
+
+        if base["status"] == "skipped" and not base["message"]:
+            if place_orders:
+                base["status"] = "ready"
+                base["message"] = "ready for paper order"
+                steps.append(self._step("submit", "pass", base["message"]))
+        return base
+
+    def _apply_buy_gates(
+        self,
+        base: dict[str, Any],
+        steps: list[dict[str, Any]],
+        quantity_held: float,
+        current_position_count: int,
+        equity: float,
+        cash: float,
+        price: float,
+        candidate: dict[str, Any],
+    ) -> None:
+        if quantity_held > 0:
+            base["message"] = "position already exists"
+            steps.append(self._step("duplicate_position", "fail", base["message"]))
+            return
+        steps.append(self._step("duplicate_position", "pass", "no existing position"))
+        if current_position_count >= self.config.max_positions:
+            base["message"] = "max open positions reached"
+            steps.append(self._step("max_positions", "fail", base["message"]))
+            return
+        steps.append(self._step("max_positions", "pass", f"{current_position_count} < {self.config.max_positions}"))
+        ratio = float(candidate.get("adjusted_position_ratio") or self.config.per_trade_position_ratio)
+        ratio = max(0.001, min(ratio, self.config.per_trade_position_ratio, 1.0))
+        notional = min(equity * ratio, self.config.max_order_notional, cash)
+        if notional < self.config.min_order_notional:
+            base["message"] = "notional below minimum or cash unavailable"
+            steps.append(self._step("notional", "fail", base["message"]))
+            return
+        steps.append(self._step("notional", "pass", f"approved notional {notional:.2f}"))
+        base["quantity"] = round(notional / price, 8)
+        base["notional"] = round(base["quantity"] * price, 8)
+        if base["quantity"] <= 0:
+            base["message"] = "quantity rounded to zero"
+            steps.append(self._step("quantity", "fail", base["message"]))
+            return
+        steps.append(self._step("quantity", "pass", f"quantity {base['quantity']}"))
+
+    def _apply_sell_gates(self, base: dict[str, Any], steps: list[dict[str, Any]], quantity_held: float, price: float) -> None:
+        if quantity_held <= 0:
+            base["message"] = "no position to sell; short selling disabled"
+            steps.append(self._step("short_selling", "fail", base["message"]))
+            return
+        steps.append(self._step("short_selling", "pass", "existing long position available"))
+        base["quantity"] = round(quantity_held, 8)
+        base["notional"] = round(base["quantity"] * price, 8)
+        steps.append(self._step("quantity", "pass", f"sell quantity {base['quantity']}"))
+
+    def _step(self, name: str, status: str, reason: str) -> dict[str, Any]:
+        return {
+            "name": name,
+            "status": status,
+            "reason": reason,
+            "timestamp": _now(),
+        }
+
+
 class AutoTradingEngine:
     """Runtime state and paper-only order decision rules."""
 
@@ -342,98 +485,21 @@ class AutoTradingEngine:
         current_position_count: int,
         place_orders: bool,
     ) -> dict[str, Any]:
-        position = positions.get(symbol) or {}
-        quantity_held = float(position.get("quantity", 0) or 0)
-        steps: list[dict[str, Any]] = []
-        base = {
-            "timestamp": _now(),
-            "symbol": symbol,
-            "action": action,
-            "price": price,
-            "quantity": 0.0,
-            "notional": 0.0,
-            "strategy_id": strategy_id,
-            "confidence": confidence,
-            "reason": reason,
-            "status": "skipped",
-            "message": "",
-            "place_orders": bool(place_orders),
-            "steps": steps,
-        }
-
-        if self.config.real_trading_enabled:
-            base["message"] = "real trading is blocked"
-            steps.append(self._decision_step("real_trading_gate", "fail", base["message"]))
-            return base
-        steps.append(self._decision_step("real_trading_gate", "pass", "paper mode enforced"))
-        if self._cooldown_active():
-            base["message"] = f"risk cooldown active until {self.risk_state.cooldown_until}"
-            steps.append(self._decision_step("risk_cooldown", "fail", base["message"]))
-            return base
-        steps.append(self._decision_step("risk_cooldown", "pass", "no active cooldown"))
-        if self.risk_state.kill_switch_active:
-            base["message"] = self.risk_state.reason or "risk kill switch active"
-            steps.append(self._decision_step("kill_switch", "fail", base["message"]))
-            return base
-        steps.append(self._decision_step("kill_switch", "pass", "kill switch inactive"))
-        if price <= 0:
-            base["message"] = "missing executable price"
-            steps.append(self._decision_step("market_data", "fail", base["message"]))
-            return base
-        steps.append(self._decision_step("market_data", "pass", "executable price available"))
-        if confidence < self.config.confidence_threshold:
-            base["message"] = f"confidence below threshold {self.config.confidence_threshold:.2f}"
-            steps.append(self._decision_step("confidence", "fail", base["message"]))
-            return base
-        steps.append(self._decision_step("confidence", "pass", f"{confidence:.2f} >= {self.config.confidence_threshold:.2f}"))
-        if not place_orders:
-            base["status"] = "simulated"
-            base["message"] = "decision preview only; no paper order sent"
-            steps.append(self._decision_step("submit_mode", "skip", base["message"]))
-        else:
-            steps.append(self._decision_step("submit_mode", "pass", "paper order submission requested"))
-
-        if action == "BUY":
-            if quantity_held > 0:
-                base["message"] = "position already exists"
-                steps.append(self._decision_step("duplicate_position", "fail", base["message"]))
-                return base
-            steps.append(self._decision_step("duplicate_position", "pass", "no existing position"))
-            if current_position_count >= self.config.max_positions:
-                base["message"] = "max open positions reached"
-                steps.append(self._decision_step("max_positions", "fail", base["message"]))
-                return base
-            steps.append(self._decision_step("max_positions", "pass", f"{current_position_count} < {self.config.max_positions}"))
-            ratio = float(candidate.get("adjusted_position_ratio") or self.config.per_trade_position_ratio)
-            ratio = max(0.001, min(ratio, self.config.per_trade_position_ratio, 1.0))
-            notional = min(equity * ratio, self.config.max_order_notional, cash)
-            if notional < self.config.min_order_notional:
-                base["message"] = "notional below minimum or cash unavailable"
-                steps.append(self._decision_step("notional", "fail", base["message"]))
-                return base
-            steps.append(self._decision_step("notional", "pass", f"approved notional {notional:.2f}"))
-            base["quantity"] = round(notional / price, 8)
-            base["notional"] = round(base["quantity"] * price, 8)
-            if base["quantity"] <= 0:
-                base["message"] = "quantity rounded to zero"
-                steps.append(self._decision_step("quantity", "fail", base["message"]))
-                return base
-            steps.append(self._decision_step("quantity", "pass", f"quantity {base['quantity']}"))
-        else:
-            if quantity_held <= 0:
-                base["message"] = "no position to sell; short selling disabled"
-                steps.append(self._decision_step("short_selling", "fail", base["message"]))
-                return base
-            steps.append(self._decision_step("short_selling", "pass", "existing long position available"))
-            base["quantity"] = round(quantity_held, 8)
-            base["notional"] = round(base["quantity"] * price, 8)
-            steps.append(self._decision_step("quantity", "pass", f"sell quantity {base['quantity']}"))
-
-        if place_orders:
-            base["status"] = "ready"
-            base["message"] = "ready for paper order"
-            steps.append(self._decision_step("submit", "pass", base["message"]))
-        return base
+        pipeline = DecisionPipeline(self.config, self.risk_state, self._cooldown_active())
+        return pipeline.build_one(
+            symbol=symbol,
+            action=action,
+            price=price,
+            confidence=confidence,
+            strategy_id=strategy_id,
+            reason=reason,
+            candidate=candidate,
+            equity=equity,
+            cash=cash,
+            positions=positions,
+            current_position_count=current_position_count,
+            place_orders=place_orders,
+        )
 
     def _candidates(self, strategy_result: dict[str, Any]) -> list[dict[str, Any]]:
         winners = [dict(item) for item in strategy_result.get("winners", []) if str(item.get("action") or "").upper() in {"BUY", "SELL"}]

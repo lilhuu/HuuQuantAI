@@ -26,6 +26,7 @@ class ErrorCode:
     AI_PROVIDER_UNAVAILABLE = "ai.provider_unavailable"
     AI_SIGNAL_NOT_FOUND = "ai.signal_not_found"
     AI_SIGNAL_REJECTED = "ai.signal_rejected"
+    RATE_LIMITED = "request.rate_limited"
     INTERNAL_SERVER_ERROR = "server.internal_error"
 
 
