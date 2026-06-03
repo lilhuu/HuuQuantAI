@@ -218,6 +218,39 @@ def test_auto_trading_background_loop_start_and_pause(tmp_path):
     asyncio.run(scenario())
 
 
+def test_auto_trading_background_loop_survives_unhandled_scan_error(tmp_path):
+    async def scenario():
+        service = CryptoService(
+            {
+                "crypto": {"exchange": "binance", "symbols": ["BTC/USDT"]},
+                "auto_trading": {"symbols": ["BTC/USDT"], "scan_interval_seconds": 5},
+                "storage": {"db_path": str(tmp_path / "loop_guard.db")},
+            }
+        )
+
+        async def broken_scan():
+            raise RuntimeError("scan exploded")
+
+        service._run_auto_trading_cycle_locked = broken_scan
+        started = await service.start_auto_trading()
+        assert started.state == "running"
+
+        await asyncio.sleep(0.02)
+        task = service._auto_loop_task
+        assert task is not None
+        assert task.done() is False
+        status = service.auto_trading_engine.status()
+        assert status["loop_running"] is True
+        assert status["last_error_type"] == "RuntimeError"
+        assert any(log["event"] == "cycle_failed" and log["payload"].get("source") == "auto_loop" for log in status["logs"])
+
+        paused = await service.pause_auto_trading()
+        assert paused.state == "paused"
+        assert paused.loop_running is False
+
+    asyncio.run(scenario())
+
+
 def test_auto_trading_scan_lock_skips_overlapping_cycle(tmp_path):
     async def scenario():
         service = CryptoService(

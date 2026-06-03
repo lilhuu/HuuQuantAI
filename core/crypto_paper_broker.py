@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from core.crypto_market_data_provider import normalize_crypto_symbol
+from core.sqlite_utils import configure_sqlite_connection
 from core.take_profit_manager import MonitorConfig, TakeProfitManager, TriggerResult
 
 
@@ -559,9 +560,33 @@ class CryptoPaperBrokerExecutor:
             )
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.storage_path)
+        conn = sqlite3.connect(self.storage_path, timeout=30)
+        configure_sqlite_connection(conn)
         conn.row_factory = sqlite3.Row
         return conn
+
+    def _existing_equity_keys(self, conn: sqlite3.Connection) -> set[tuple[str, str, str]]:
+        rows = conn.execute("SELECT timestamp, COALESCE(order_id, '') AS order_id, COALESCE(reason, '') AS reason FROM crypto_paper_equity_curve").fetchall()
+        return {(str(row["timestamp"]), str(row["order_id"]), str(row["reason"])) for row in rows}
+
+    def _existing_log_keys(self, conn: sqlite3.Connection) -> set[tuple[str, str, str, str, str]]:
+        rows = conn.execute(
+            """
+            SELECT timestamp, event, COALESCE(order_id, '') AS order_id,
+                   COALESCE(symbol, '') AS symbol, COALESCE(message, '') AS message
+            FROM crypto_paper_logs
+            """
+        ).fetchall()
+        return {
+            (
+                str(row["timestamp"]),
+                str(row["event"]),
+                str(row["order_id"]),
+                str(row["symbol"]),
+                str(row["message"]),
+            )
+            for row in rows
+        }
 
     def _load_state(self) -> bool:
         if not self.persistence_enabled or not self._persistence_ready:
@@ -662,6 +687,7 @@ class CryptoPaperBrokerExecutor:
             return
         now = datetime.now().isoformat()
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             conn.execute(
                 """
                 INSERT INTO crypto_paper_account
@@ -676,14 +702,6 @@ class CryptoPaperBrokerExecutor:
                 """,
                 (self.broker_name, self.quote_currency, self._text(self.initial_cash), self._text(self.cash), now),
             )
-            for table in (
-                "crypto_paper_orders",
-                "crypto_paper_positions",
-                "crypto_paper_trades",
-                "crypto_paper_equity_curve",
-                "crypto_paper_logs",
-            ):
-                conn.execute(f"DELETE FROM {table}")
 
             conn.executemany(
                 """
@@ -691,6 +709,21 @@ class CryptoPaperBrokerExecutor:
                     (order_id, symbol, action, quantity, price, strategy, order_type, status, message,
                      filled_quantity, filled_price, fee, realized_pnl, created_time, filled_time)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(order_id) DO UPDATE SET
+                    symbol = excluded.symbol,
+                    action = excluded.action,
+                    quantity = excluded.quantity,
+                    price = excluded.price,
+                    strategy = excluded.strategy,
+                    order_type = excluded.order_type,
+                    status = excluded.status,
+                    message = excluded.message,
+                    filled_quantity = excluded.filled_quantity,
+                    filled_price = excluded.filled_price,
+                    fee = excluded.fee,
+                    realized_pnl = excluded.realized_pnl,
+                    created_time = excluded.created_time,
+                    filled_time = excluded.filled_time
                 """,
                 [
                     (
@@ -714,11 +747,27 @@ class CryptoPaperBrokerExecutor:
                 ],
             )
 
+            active_position_symbols = [
+                symbol
+                for symbol, position in self.positions.items()
+                if float(position.get("quantity", 0) or 0) > 0
+            ]
+            if active_position_symbols:
+                placeholders = ",".join("?" for _ in active_position_symbols)
+                conn.execute(f"DELETE FROM crypto_paper_positions WHERE symbol NOT IN ({placeholders})", active_position_symbols)
+            else:
+                conn.execute("DELETE FROM crypto_paper_positions")
             conn.executemany(
                 """
                 INSERT INTO crypto_paper_positions
                     (symbol, quantity, available, avg_price, last_price, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(symbol) DO UPDATE SET
+                    quantity = excluded.quantity,
+                    available = excluded.available,
+                    avg_price = excluded.avg_price,
+                    last_price = excluded.last_price,
+                    updated_at = excluded.updated_at
                 """,
                 [
                     (
@@ -739,6 +788,17 @@ class CryptoPaperBrokerExecutor:
                 INSERT INTO crypto_paper_trades
                     (trade_id, order_id, symbol, action, quantity, price, fee, realized_pnl, timestamp, strategy, cash)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(trade_id) DO UPDATE SET
+                    order_id = excluded.order_id,
+                    symbol = excluded.symbol,
+                    action = excluded.action,
+                    quantity = excluded.quantity,
+                    price = excluded.price,
+                    fee = excluded.fee,
+                    realized_pnl = excluded.realized_pnl,
+                    timestamp = excluded.timestamp,
+                    strategy = excluded.strategy,
+                    cash = excluded.cash
                 """,
                 [
                     (
@@ -758,6 +818,14 @@ class CryptoPaperBrokerExecutor:
                 ],
             )
 
+            existing_equity_keys = self._existing_equity_keys(conn)
+            new_equity_items = []
+            for item in self.equity_curve:
+                key = (str(item.get("timestamp", "")), str(item.get("order_id", "")), str(item.get("reason", "")))
+                if key in existing_equity_keys:
+                    continue
+                existing_equity_keys.add(key)
+                new_equity_items.append(item)
             conn.executemany(
                 """
                 INSERT INTO crypto_paper_equity_curve
@@ -774,10 +842,24 @@ class CryptoPaperBrokerExecutor:
                         str(item.get("order_id", "")),
                         str(item.get("reason", "")),
                     )
-                    for item in self.equity_curve
+                    for item in new_equity_items
                 ],
             )
 
+            existing_log_keys = self._existing_log_keys(conn)
+            new_log_items = []
+            for item in self.paper_logs:
+                key = (
+                    str(item.get("timestamp", "")),
+                    str(item.get("event", "")),
+                    str(item.get("order_id", "")),
+                    str(item.get("symbol", "")),
+                    str(item.get("message", "")),
+                )
+                if key in existing_log_keys:
+                    continue
+                existing_log_keys.add(key)
+                new_log_items.append(item)
             conn.executemany(
                 """
                 INSERT INTO crypto_paper_logs
@@ -794,7 +876,7 @@ class CryptoPaperBrokerExecutor:
                         str(item.get("message", "")),
                         json.dumps(item.get("payload", {}) or {}, ensure_ascii=False),
                     )
-                    for item in self.paper_logs
+                    for item in new_log_items
                 ],
             )
 

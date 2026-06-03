@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.sqlite_utils import configure_sqlite_connection
+
 
 @dataclass
 class FillResult:
@@ -224,7 +226,8 @@ class ShadowTradingEngine:
     def _connect(self) -> sqlite3.Connection:
         if not self.storage_path:
             raise RuntimeError("shadow trading storage is not configured")
-        conn = sqlite3.connect(self.storage_path)
+        conn = sqlite3.connect(self.storage_path, timeout=30)
+        configure_sqlite_connection(conn)
         conn.row_factory = sqlite3.Row
         return conn
 

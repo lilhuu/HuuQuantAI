@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Iterable, List
 
 from core.crypto_market_data_provider import normalize_crypto_symbol
+from core.sqlite_utils import configure_sqlite_connection
 
 
 class CryptoMarketCache:
@@ -306,7 +307,6 @@ class CryptoMarketCache:
             path.parent.mkdir(parents=True, exist_ok=True)
             self.storage_path = str(path)
             with self._connect() as conn:
-                conn.execute("PRAGMA journal_mode=WAL")
                 conn.executescript(
                     """
                     CREATE TABLE IF NOT EXISTS crypto_quotes_snapshot (
@@ -365,7 +365,8 @@ class CryptoMarketCache:
             self._ready = False
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.storage_path)
+        conn = sqlite3.connect(self.storage_path, timeout=30)
+        configure_sqlite_connection(conn)
         conn.row_factory = sqlite3.Row
         return conn
 

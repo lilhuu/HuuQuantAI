@@ -11,6 +11,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from core.sqlite_utils import configure_sqlite_connection
+
 
 class AuditStage(str, Enum):
     MACRO_GATE = "macro_gate"
@@ -172,7 +174,8 @@ class AuditSQLiteStore:
             )
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30)
+        configure_sqlite_connection(conn)
         conn.row_factory = sqlite3.Row
         return conn
 

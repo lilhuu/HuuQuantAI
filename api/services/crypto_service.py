@@ -153,6 +153,7 @@ class CryptoService:
         self.ai_store = AiSignalStore(storage_config.get("ai_signals_db_path") or sqlite_storage_path)
         self._auto_scan_lock = asyncio.Lock()
         self._auto_loop_task: asyncio.Task | None = None
+        self._auto_loop_consecutive_errors = 0
 
     async def get_quotes(
         self,
@@ -548,8 +549,22 @@ class CryptoService:
         self.auto_trading_engine.mark_loop(running=True, next_run_at=datetime.now(timezone.utc).isoformat())
         try:
             while self.auto_trading_engine.state == "running" and self.auto_trading_engine.config.enabled:
-                async with self._auto_scan_lock:
-                    await self._run_auto_trading_cycle_locked()
+                try:
+                    async with self._auto_scan_lock:
+                        await self._run_auto_trading_cycle_locked()
+                    self._auto_loop_consecutive_errors = 0
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    self._auto_loop_consecutive_errors += 1
+                    self.auto_trading_engine.record_error(
+                        str(exc),
+                        {
+                            "type": exc.__class__.__name__,
+                            "source": "auto_loop",
+                            "consecutive_errors": self._auto_loop_consecutive_errors,
+                        },
+                    )
 
                 if self.auto_trading_engine.state != "running" or not self.auto_trading_engine.config.enabled:
                     break

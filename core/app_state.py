@@ -8,6 +8,8 @@ from pathlib import Path
 import sqlite3
 from typing import Any, Dict, Optional
 
+from core.sqlite_utils import configure_sqlite_connection
+
 
 class AppStateStore:
     """Persist users, sessions, and user preferences in a local SQLite file."""
@@ -18,9 +20,7 @@ class AppStateStore:
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=30)
-        conn.execute("PRAGMA busy_timeout = 30000")
-        conn.execute("PRAGMA foreign_keys = ON")
-        return conn
+        return configure_sqlite_connection(conn)
 
     def _init_database(self) -> None:
         db_file = Path(self.db_path)
@@ -28,8 +28,6 @@ class AppStateStore:
 
         with self._connect() as conn:
             cursor = conn.cursor()
-            cursor.execute("PRAGMA journal_mode = WAL")
-            cursor.execute("PRAGMA synchronous = NORMAL")
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS users (

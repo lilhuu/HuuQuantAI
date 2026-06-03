@@ -14,6 +14,7 @@ import threading
 from typing import Any, Callable, Dict, Optional
 
 from core.desktop_paths import resolve_writable_path
+from core.sqlite_utils import configure_sqlite_connection
 
 
 EventCallback = Callable[[Dict[str, Any]], None]
@@ -269,10 +270,7 @@ class EventBus:
             raise RuntimeError("event bus persistence is disabled")
         self._persistent_db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self._persistent_db_path), timeout=30)
-        conn.execute("PRAGMA busy_timeout = 30000")
-        conn.execute("PRAGMA journal_mode = WAL")
-        conn.execute("PRAGMA synchronous = NORMAL")
-        return conn
+        return configure_sqlite_connection(conn)
 
     def _init_event_store(self) -> None:
         with self._connect() as conn:

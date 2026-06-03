@@ -71,5 +71,5 @@ def test_provider_connection_health_report():
     provider = CryptoMarketDataProvider({"exchange": "binance"})
     health = provider.get_connection_health()
 
-    assert set(health) == {"quotes", "ohlcv", "orderbook"}
+    assert set(health) == {"quotes", "ohlcv", "orderbook", "all_tickers"}
     assert health["quotes"]["state"] == "closed"

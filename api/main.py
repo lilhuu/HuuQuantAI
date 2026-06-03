@@ -21,6 +21,7 @@ from api.models.response import HealthCheckResponse
 from api.routers import auth, crypto, crypto_ws
 from api.services.observability import api_metrics
 from core.desktop_paths import resource_path
+from core.sqlite_utils import configure_sqlite_connection
 
 
 settings = get_api_settings()
@@ -153,7 +154,8 @@ def _check_sqlite_storage(service: Any) -> dict[str, Any]:
     try:
         path = Path(str(db_path)).resolve()
         path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(path) as conn:
+        with sqlite3.connect(path, timeout=30) as conn:
+            configure_sqlite_connection(conn)
             quick_check = conn.execute("PRAGMA quick_check").fetchone()
             conn.execute("SELECT 1").fetchone()
         message = str(quick_check[0] if quick_check else "ok")

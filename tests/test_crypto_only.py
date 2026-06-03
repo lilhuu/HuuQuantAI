@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+import sqlite3
 
 import api.dependencies as dependencies
 from api.dependencies import get_auth_service, get_current_user, get_crypto_service
@@ -95,6 +96,37 @@ def test_crypto_paper_broker_persists_and_restores(tmp_path):
     assert orders["items"][0]["order_id"] == order.order_id
     assert restored.get_equity_curve(10)
     assert any(item["event"] == "account_restored" for item in logs)
+
+
+def test_crypto_paper_broker_uses_wal_and_deduplicates_append_only_rows(tmp_path):
+    storage_path = tmp_path / "paper_state_wal.db"
+    config = {
+        "storage_path": str(storage_path),
+        "initial_cash": 10000,
+        "max_order_notional": 5000,
+        "max_position_ratio": 1.0,
+        "partial_fill_enabled": False,
+    }
+
+    broker = CryptoPaperBrokerExecutor(config)
+    buy = broker.place_order("BTC/USDT", "BUY", 0.002, 1000)
+    assert buy.status == "filled"
+    broker._persist_state()
+
+    with sqlite3.connect(storage_path) as conn:
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+        first_equity_count = conn.execute("SELECT COUNT(*) FROM crypto_paper_equity_curve").fetchone()[0]
+        first_log_count = conn.execute("SELECT COUNT(*) FROM crypto_paper_logs").fetchone()[0]
+
+    broker._persist_state()
+    with sqlite3.connect(storage_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM crypto_paper_equity_curve").fetchone()[0] == first_equity_count
+        assert conn.execute("SELECT COUNT(*) FROM crypto_paper_logs").fetchone()[0] == first_log_count
+
+    sell = broker.place_order("BTC/USDT", "SELL", 0.002, 1000)
+    assert sell.status == "filled"
+    with sqlite3.connect(storage_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM crypto_paper_positions").fetchone()[0] == 0
 
 
 def test_binance_testnet_executor_credentials_gate_and_dry_run(tmp_path):
@@ -481,7 +513,8 @@ def test_crypto_parameter_optimizer_uses_crypto_backtest_and_symbols():
 
 
 def test_binance_stream_message_normalization():
-    url = build_binance_stream_url(["BTC/USDT", "ETH/USDT"], period="1h", depth_limit=20, selected_symbol="BTC/USDT")
+    url, using_proxy = build_binance_stream_url(["BTC/USDT", "ETH/USDT"], period="1h", depth_limit=20, selected_symbol="BTC/USDT")
+    assert using_proxy is False
     assert "btcusdt@ticker" in url
     assert "ethusdt@ticker" in url
     assert "btcusdt@kline_1h" in url
