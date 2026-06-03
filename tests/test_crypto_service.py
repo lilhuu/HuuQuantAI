@@ -85,6 +85,22 @@ def _ai_record(**overrides):
     return payload
 
 
+def _save_ai_record(**kwargs):
+    response = kwargs.get("response") or _advice()
+    return _ai_record(
+        symbol=kwargs.get("symbol", response.get("symbol", "BTC/USDT")),
+        period=kwargs.get("period", "1h"),
+        model=kwargs.get("model", "test-model"),
+        request_summary=kwargs.get("request_summary", {}),
+        response=response,
+        action=response.get("action", "BUY"),
+        confidence=response.get("confidence", 0.8),
+        approval_status=kwargs.get("approval_status", "approved"),
+        approval_reason=kwargs.get("approval_reason", "ok"),
+        approved_notional_usdt=kwargs.get("approved_notional_usdt", 0),
+    )
+
+
 def test_init_symbols_components_and_auto_config(tmp_path):
     service = _service(tmp_path, {"crypto": {"symbols": ["btc/usdt", "BTC/USDT"]}, "risk": {"max_order_notional": 500}})
 
@@ -219,6 +235,64 @@ def test_paper_order_account_positions_logs_and_auto_controls(tmp_path):
     assert asyncio.run(service.get_auto_trading_logs(limit=50)).count <= 50
 
 
+def test_paper_orders_pagination_cancel_success_and_account_initial(tmp_path):
+    service = _service(
+        tmp_path,
+        {
+            "crypto": {"paper": {"partial_fill_enabled": False, "max_position_ratio": 1.0, "max_order_notional": 10000}},
+            "storage": {"db_path": str(tmp_path / "paper_page.db")},
+        },
+    )
+    assert asyncio.run(service.get_paper_account()).equity == 10000
+    orders = [
+        asyncio.run(service.place_paper_order(CryptoPaperOrderRequest(symbol=f"C{index}/USDT", action="BUY", quantity=1, price=100)))
+        for index in range(5)
+    ]
+    page = asyncio.run(service.get_paper_orders(limit=2, offset=1))
+    assert page.count == 2
+    assert page.total == 5
+    assert asyncio.run(service.cancel_paper_order(orders[0].order_id))["success"] is False
+
+    partial_service = _service(
+        tmp_path,
+        {
+            "crypto": {"paper": {"max_position_ratio": 1.0, "max_order_notional": 10000}},
+            "storage": {"db_path": str(tmp_path / "paper_partial.db")},
+        },
+    )
+    partial = asyncio.run(partial_service.place_paper_order(CryptoPaperOrderRequest(symbol="BTC/USDT", action="BUY", quantity=0.1, price=50000)))
+    assert partial.status == "partial_filled"
+    assert asyncio.run(partial_service.cancel_paper_order(partial.order_id))["success"] is True
+
+
+def test_auto_trading_start_pause_stop_status_update_and_logs(tmp_path):
+    async def scenario():
+        service = _service(tmp_path, {"auto_trading": {"scan_interval_seconds": 3600}, "storage": {"db_path": str(tmp_path / "auto.db")}})
+        started = await service.start_auto_trading()
+        assert started.state == "running"
+        assert service._auto_loop_task is not None
+        assert not service._auto_loop_task.done()
+
+        status = await service.get_auto_trading_status()
+        assert status.state == "running"
+        updated = await service.update_auto_trading_config(AutoTradingConfigRequest(scan_interval_seconds=60))
+        assert updated.config["scan_interval_seconds"] == 60
+        logs = await service.get_auto_trading_logs(limit=50)
+        assert logs.count <= 50
+
+        paused = await service.pause_auto_trading()
+        assert paused.state == "paused"
+        assert service._auto_loop_task is None
+
+        restarted = await service.start_auto_trading()
+        assert restarted.state == "running"
+        stopped = await service.stop_auto_trading()
+        assert stopped.state == "stopped"
+        assert service._auto_loop_task is None
+
+    asyncio.run(scenario())
+
+
 def test_macro_overview_cache_and_connection_health(tmp_path):
     service = _service(tmp_path)
     snapshot = MacroSnapshot(timestamp="2026-06-03T00:00:00Z")
@@ -261,6 +335,25 @@ def test_ai_assess_advice_rules_and_helpers(tmp_path):
     assert service._position_quantity("ETH/USDT", []) == 0.0
 
 
+def test_ai_assess_real_trading_flags_cash_caps_and_position_caps(tmp_path):
+    assert _service(tmp_path, {"risk": {"real_trading_enabled": True}})._assess_ai_advice(_advice(), {"cash": 1000}, [])["approval_status"] == "blocked"
+    assert _service(tmp_path, {"trading": {"real_trading_enabled": True}})._assess_ai_advice(_advice(), {"cash": 1000}, [])["approval_status"] == "blocked"
+    assert _service(tmp_path, {"crypto": {"paper": {"real_trading_enabled": True}}})._assess_ai_advice(_advice(), {"cash": 1000}, [])["approval_status"] == "blocked"
+    assert _service(tmp_path, {"crypto": {"testnet": {"real_trading_enabled": True}}})._assess_ai_advice(_advice(), {"cash": 1000}, [])["approval_status"] == "blocked"
+    assert _service(tmp_path, {"crypto": {"mainnet": {"real_trading_enabled": True}}})._assess_ai_advice(_advice(), {"cash": 1000}, [])["approval_status"] == "blocked"
+
+    cash_cap = _service(tmp_path, {"ai": {"max_order_notional": 300}})._assess_ai_advice(_advice("BUY", notional=500), {"available_cash": 200}, [])
+    assert cash_cap["approval_status"] == "approved"
+    assert cash_cap["approved_notional_usdt"] == 200
+
+    ai_cap = _service(tmp_path, {"ai": {"max_order_notional": 300}})._assess_ai_advice(_advice("BUY", notional=500), {"available_cash": 1000}, [])
+    assert ai_cap["approved_notional_usdt"] == 300
+    assert _service(tmp_path, {"ai": {"max_order_notional": 300}})._assess_ai_advice(_advice("BUY"), {"available_cash": 0}, [])["approval_status"] == "blocked"
+    assert _service(tmp_path, {"ai": {"max_order_notional": 300}, "crypto": {"paper": {"max_order_notional": 100}}})._assess_ai_advice(
+        _advice("BUY", notional=500), {"available_cash": 1000}, []
+    )["approved_notional_usdt"] == 100
+
+
 def test_ai_signal_analyze_list_get_and_provider_failures(tmp_path):
     service = _service(tmp_path, {"ai": {"enabled": True, "min_confidence_for_order": 0.65, "max_order_notional": 300}, "storage": {"db_path": str(tmp_path / "ai.db")}})
     service.get_quotes = AsyncMock(return_value=CryptoQuotesResponse(items=[CryptoQuoteResponse(**_quote())], count=1, source="unit"))
@@ -292,3 +385,25 @@ def test_ai_signal_analyze_list_get_and_provider_failures(tmp_path):
     service.ai_store.get_signal = MagicMock(return_value=None)
     with pytest.raises(ApiError):
         asyncio.run(service.get_ai_signal("missing"))
+
+
+def test_analyze_ai_signal_hold_low_confidence_buy_and_sell_no_position(tmp_path):
+    service = _service(tmp_path, {"ai": {"enabled": True, "min_confidence_for_order": 0.65, "max_order_notional": 300}, "storage": {"db_path": str(tmp_path / "ai_cases.db")}})
+    service.get_quotes = AsyncMock(return_value=CryptoQuotesResponse(items=[CryptoQuoteResponse(**_quote())], count=1, source="unit"))
+    service.get_klines = AsyncMock(return_value=CryptoKLinesResponse(symbol="BTC/USDT", period="1h", items=[CryptoKLineResponse(**_kline())], count=1))
+    service.get_macro_overview = AsyncMock(return_value=MacroOverviewResponse(data={}, gate={"state": "ALLOW_FULL"}))
+    service.paper_broker.get_account_info = MagicMock(return_value={"cash": 1000, "available_cash": 1000})
+    service.paper_broker.get_positions = MagicMock(return_value=[])
+    service.paper_broker.get_orders = MagicMock(return_value={"items": []})
+    service.ai_store.save_signal = MagicMock(side_effect=lambda **kwargs: _save_ai_record(**kwargs))
+
+    for advice, expected_status, expected_reason in [
+        (_advice("HOLD", 0.8, 0), "blocked", "HOLD"),
+        (_advice("BUY", 0.3, 200), "blocked", "confidence"),
+        (_advice("BUY", 0.8, 200), "approved", "approved"),
+        (_advice("SELL", 0.8, 200), "blocked", "no position to sell"),
+    ]:
+        service.ai_advisor.analyze = MagicMock(return_value=advice)
+        result = asyncio.run(service.analyze_ai_signal(AiSignalAnalyzeRequest(symbol="BTC/USDT", period="1h", limit=30)))
+        assert result.signal.approval_status == expected_status
+        assert expected_reason in result.signal.approval_reason

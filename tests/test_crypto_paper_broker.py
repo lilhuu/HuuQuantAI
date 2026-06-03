@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-from core.crypto_paper_broker import CryptoPaperBrokerExecutor
+from core.crypto_paper_broker import CryptoPaperBrokerExecutor, CryptoPaperOrder
 
 
 def _broker(**config):
@@ -214,3 +214,175 @@ def test_precision_order_id_symbol_normalization_and_logs(tmp_path):
         persistent.place_order(f"T{index}/USDT", "BUY", 1, 10)
     with sqlite3.connect(storage_path) as conn:
         assert conn.execute("SELECT COUNT(*) FROM crypto_paper_logs").fetchone()[0] <= 3
+
+
+def test_cancel_pending_partial_nonexistent_filled_cancelled_and_rejected_orders():
+    broker = _broker(max_order_notional=10000)
+    pending = CryptoPaperOrder(symbol="BTC/USDT", action="BUY", quantity=1, price=1, order_id="pending-1")
+    broker.orders[pending.order_id] = pending
+    assert broker.cancel_order("pending-1") is True
+    assert broker.orders["pending-1"].status == "cancelled"
+    assert broker.cancel_order("pending-1") is False
+
+    partial = broker.place_order("ETH/USDT", "BUY", 10, 500)
+    assert partial.status == "partial_filled"
+    assert broker.cancel_order(partial.order_id) is True
+
+    filled = _broker(partial_fill_enabled=False).place_order("BTC/USDT", "BUY", 0.01, 50000)
+    filled_broker = _broker(partial_fill_enabled=False)
+    filled_broker.orders[filled.order_id] = filled
+    assert filled_broker.cancel_order(filled.order_id) is False
+
+    rejected = broker.place_order("BTC/USDT", "HOLD", 1, 1)
+    assert broker.cancel_order(rejected.order_id) is False
+    assert broker.cancel_order("non-existent-id") is False
+
+
+def test_account_initial_equity_market_value_profit_return_trades_fee_and_positions():
+    broker = _broker(max_order_notional=10000, max_position_ratio=1.0, partial_fill_enabled=False)
+    initial = broker.get_account_info()
+    assert initial["equity"] == initial["cash"] == initial["initial_cash"] == 10000
+
+    buy = broker.place_order("BTC/USDT", "BUY", 0.02, 50000)
+    account = broker.get_account_info()
+    assert account["equity"] == pytest.approx(account["cash"] + account["market_value"])
+    assert account["positions"][0]["symbol"] == "BTC/USDT"
+    assert account["total_trades"] == 1
+    assert account["total_fee"] == pytest.approx(buy.fee)
+
+    sell = broker.place_order("BTC/USDT", "SELL", 0.02, 50000)
+    closed = broker.get_account_info()
+    assert sell.status == "filled"
+    assert closed["total_profit"] < 0
+    assert closed["total_return_percent"] == pytest.approx(closed["total_profit"] / 10000 * 100)
+    assert closed["total_trades"] == 2
+
+
+def test_positions_empty_after_init_sorted_market_value_and_unrealized_fields():
+    broker = _broker(max_order_notional=10000, max_position_ratio=1.0, partial_fill_enabled=False)
+    assert broker.get_positions() == []
+
+    broker.place_order("ETH/USDT", "BUY", 1, 1000)
+    broker.place_order("BTC/USDT", "BUY", 0.02, 50000)
+    broker.positions["BTC/USDT"]["last_price"] = 51000
+    positions = broker.get_positions()
+
+    assert [item["symbol"] for item in positions] == ["BTC/USDT", "ETH/USDT"]
+    btc = positions[0]
+    assert btc["available"] == btc["quantity"]
+    assert btc["market_value"] == pytest.approx(btc["quantity"] * btc["current_price"])
+    assert btc["cost_basis"] == pytest.approx(btc["quantity"] * btc["avg_price"])
+    assert btc["unrealized_pnl"] == pytest.approx(btc["market_value"] - btc["cost_basis"])
+    assert btc["unrealized_pnl_percent"] == pytest.approx(btc["unrealized_pnl"] / btc["cost_basis"] * 100)
+
+
+def test_orders_filters_limits_offsets_and_sorting():
+    broker = _broker(max_order_notional=10000, max_position_ratio=1.0, partial_fill_enabled=False)
+    first = broker.place_order("BTC/USDT", "BUY", 0.01, 50000)
+    second = broker.place_order("ETH/USDT", "BUY", 1, 1000)
+    rejected = broker.place_order("SOL/USDT", "HOLD", 1, 100)
+
+    all_orders = broker.get_orders(limit=500, offset=-1)
+    assert all_orders["count"] == 3
+    assert all_orders["offset"] == 0
+    assert {item["order_id"] for item in all_orders["items"]} == {first.order_id, second.order_id, rejected.order_id}
+    assert broker.get_orders(status="filled")["total"] == 2
+    assert broker.get_orders(status="rejected")["items"][0]["order_id"] == rejected.order_id
+    assert broker.get_orders(limit=0)["limit"] == 100
+    assert broker.get_orders(limit=999)["limit"] == 500
+    assert {first.order_id, second.order_id}.issubset(set(broker.orders))
+
+
+def test_equity_curve_and_logs_limit_bounds_and_latest_items():
+    broker = _broker(max_log_entries=600)
+    for index in range(20):
+        broker._record_equity_point(reason=f"point_{index}")
+        broker._record_log(f"log_{index}", "message")
+
+    assert len(broker.get_equity_curve(5)) == 5
+    assert broker.get_equity_curve(5)[-1]["reason"] == "point_19"
+    assert len(broker.get_paper_logs(5)) == 5
+    assert broker.get_paper_logs(5)[-1]["event"] == "log_19"
+
+
+def test_persist_orders_positions_trades_account_and_deduplicated_curves_logs(tmp_path):
+    storage_path = tmp_path / "persist_all.db"
+    config = {
+        "storage_path": str(storage_path),
+        "initial_cash": 12345,
+        "max_order_notional": 10000,
+        "max_position_ratio": 1.0,
+        "partial_fill_enabled": False,
+    }
+    broker = CryptoPaperBrokerExecutor(config)
+    filled = broker.place_order("BTC/USDT", "BUY", 0.02, 50000)
+    rejected = broker.place_order("BTC/USDT", "HOLD", 1, 1)
+    before_equity_count = len(broker.equity_curve)
+    before_log_keys = {
+        (item["event"], item["order_id"], item["symbol"], item["message"])
+        for item in broker.paper_logs
+    }
+
+    restored = CryptoPaperBrokerExecutor(config)
+    restored_again = CryptoPaperBrokerExecutor(config)
+
+    assert restored.initial_cash == broker.initial_cash == 12345
+    assert restored.cash == pytest.approx(broker.cash)
+    assert restored.broker_name == broker.broker_name
+    assert restored.quote_currency == broker.quote_currency
+    assert restored.orders[filled.order_id].status == "filled"
+    assert restored.orders[rejected.order_id].status == "rejected"
+    assert restored.positions["BTC/USDT"]["quantity"] == pytest.approx(0.02)
+    assert restored.trade_history[0]["order_id"] == filled.order_id
+    assert len(restored_again.equity_curve) == before_equity_count
+    assert before_log_keys.issubset(
+        {
+            (item["event"], item["order_id"], item["symbol"], item["message"])
+            for item in restored_again.paper_logs
+        }
+    )
+
+
+def test_persist_no_storage_path_and_restore_from_empty_db(tmp_path):
+    no_path = CryptoPaperBrokerExecutor({"storage_path": "", "persistence_enabled": True})
+    assert no_path.persistence_enabled is False
+    no_path._persist_state()
+
+    empty_path = tmp_path / "empty.db"
+    empty = CryptoPaperBrokerExecutor({"storage_path": str(empty_path), "persistence_enabled": True})
+    assert empty._load_state() is True
+    with sqlite3.connect(empty_path) as conn:
+        conn.execute("DELETE FROM crypto_paper_account")
+        conn.commit()
+    fresh = CryptoPaperBrokerExecutor({"storage_path": str(empty_path), "persistence_enabled": True})
+    assert fresh.paper_logs[0]["event"] == "account_initialized"
+
+
+def test_sell_partial_position_and_cancel_releases_no_cash():
+    broker = _broker(max_order_notional=10000, max_position_ratio=1.0, partial_fill_enabled=False)
+    broker.place_order("BTC/USDT", "BUY", 0.02, 50000)
+    sell = broker.place_order("BTC/USDT", "SELL", 0.01, 51000)
+    assert sell.status == "filled"
+    assert broker.positions["BTC/USDT"]["quantity"] == pytest.approx(0.01)
+    assert broker.positions["BTC/USDT"]["available"] == pytest.approx(0.01)
+
+    partial_broker = _broker(max_order_notional=10000)
+    partial = partial_broker.place_order("ETH/USDT", "BUY", 10, 500)
+    cash_after_partial = partial_broker.cash
+    assert partial_broker.cancel_order(partial.order_id) is True
+    assert partial_broker.cash == cash_after_partial
+
+
+def test_custom_stop_loss_take_profit_override_defaults():
+    broker = _broker(partial_fill_enabled=False)
+    order = broker.place_order(
+        "BTC/USDT",
+        "BUY",
+        0.01,
+        50000,
+        stop_loss_price=45000,
+        take_profit_price=55000,
+    )
+    assert order.status == "filled"
+    assert broker.positions["BTC/USDT"]["stop_loss_price"] == 45000
+    assert broker.positions["BTC/USDT"]["take_profit_price"] == 55000
