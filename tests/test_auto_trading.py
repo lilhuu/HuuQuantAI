@@ -39,7 +39,8 @@ def test_decision_pipeline_builds_staged_ready_decision():
 
 
 def test_auto_trading_blocks_real_switch_and_builds_buy_decision():
-    blocked_engine = AutoTradingEngine({"symbols": ["BTC/USDT"], "real_trading_enabled": True})
+    blocked_engine = AutoTradingEngine({"symbols": ["BTC/USDT"]})
+    blocked_engine.config.real_trading_enabled = True
     status = blocked_engine.start()
     assert status["state"] == "blocked"
     assert status["real_trading_enabled"] is False

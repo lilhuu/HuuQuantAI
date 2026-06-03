@@ -102,11 +102,11 @@ class CryptoService:
         self.config = config or {}
         crypto_config = self.config.get("crypto", {}) or {}
         self.crypto_config = crypto_config
-        self.default_symbols = [
+        default_symbols = [
             normalize_crypto_symbol(symbol, crypto_config.get("default_quote_currency", "USDT"))
             for symbol in crypto_config.get("symbols", ["BTC/USDT", "ETH/USDT", "SOL/USDT"])
         ]
-        self.default_symbols = [symbol for symbol in self.default_symbols if symbol]
+        self.default_symbols = list(dict.fromkeys(symbol for symbol in default_symbols if symbol))
         provider_config = {
             "exchange": crypto_config.get("exchange", "binance"),
             "timeout": crypto_config.get("timeout", 10000),
@@ -164,7 +164,7 @@ class CryptoService:
         limit: int = 0,
         offset: int = 0,
     ) -> CryptoQuotesResponse:
-        target_symbols = self._normalize_symbols(symbols) if symbols else None
+        target_symbols = self._normalize_symbols(symbols) if symbols is not None else None
         if target_symbols is not None and len(target_symbols) == 0:
             return CryptoQuotesResponse(items=[], count=0, source="ccxt")
 
@@ -224,7 +224,10 @@ class CryptoService:
                     None, self.provider.load_markets, False
                 )
             except Exception:
-                markets = self.provider.load_markets(reload=False)
+                try:
+                    markets = self.provider.load_markets(reload=False)
+                except Exception:
+                    markets = {}
             if markets:
                 self.market_cache.upsert_exchange_info(markets)
                 items, total = self.market_cache.get_symbols(

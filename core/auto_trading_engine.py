@@ -50,6 +50,11 @@ def _default_strategies(symbols: list[str]) -> list[dict[str, Any]]:
     ]
 
 
+def _config_value(data: dict[str, Any], key: str, default: Any) -> Any:
+    value = data.get(key, default)
+    return default if value is None else value
+
+
 @dataclass
 class AutoTradingConfig:
     enabled: bool = False
@@ -90,16 +95,16 @@ class AutoTradingConfig:
             symbols=symbols,
             period=str(data.get("period") or "1h"),
             timeframes=[str(item) for item in data.get("timeframes", []) if str(item or "").strip()],
-            scan_interval_seconds=max(5, min(int(data.get("scan_interval_seconds", 30) or 30), 3600)),
-            max_positions=max(1, min(int(data.get("max_positions", 3) or 3), 20)),
-            per_trade_position_ratio=max(0.001, min(float(data.get("per_trade_position_ratio", 0.1) or 0.1), 1.0)),
+            scan_interval_seconds=max(5, min(int(_config_value(data, "scan_interval_seconds", 30)), 3600)),
+            max_positions=max(1, min(int(_config_value(data, "max_positions", 3)), 20)),
+            per_trade_position_ratio=max(0.001, min(float(_config_value(data, "per_trade_position_ratio", 0.1)), 1.0)),
             max_order_notional=max(1.0, float(data.get("max_order_notional", 1000.0) or 1000.0)),
             min_order_notional=max(0.0, float(data.get("min_order_notional", 10.0) or 10.0)),
             confidence_threshold=max(0.0, min(float(data.get("confidence_threshold", 0.35) or 0.35), 1.0)),
             max_daily_loss=max(0.0, float(data.get("max_daily_loss", 0.0) or 0.0)),
             max_consecutive_losses=max(0, int(data.get("max_consecutive_losses", 0) or 0)),
-            cooldown_minutes=max(1, min(int(data.get("cooldown_minutes", 30) or 30), 24 * 60)),
-            real_trading_enabled=bool(data.get("real_trading_enabled", False)),
+            cooldown_minutes=max(1, min(int(_config_value(data, "cooldown_minutes", 30)), 24 * 60)),
+            real_trading_enabled=False,
             strategies=strategies,
         )
 

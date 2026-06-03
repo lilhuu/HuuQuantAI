@@ -10,8 +10,10 @@ import json
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
 from core.crypto_market_data_provider import normalize_crypto_symbol
 from core.sqlite_utils import configure_sqlite_connection
@@ -262,12 +264,12 @@ class CryptoPaperBrokerExecutor:
         if order.price <= 0:
             return "price must be greater than 0"
 
-        notional = order.quantity * order.price
-        if self.max_order_notional > 0 and notional > self.max_order_notional:
-            return f"single order notional exceeds {self.max_order_notional} {self.quote_currency}"
-
         if order.action == "BUY":
-            estimated_cost = self._fill_notional(order.action, order.quantity, order.price) * (1 + self.fee_rate)
+            notional = order.quantity * order.price
+            if self.max_order_notional > 0 and notional > self.max_order_notional:
+                return f"single order notional exceeds {self.max_order_notional} {self.quote_currency}"
+            fill_quantity = self._planned_fill_quantity(order)
+            estimated_cost = self._fill_notional(order.action, fill_quantity, order.price) * (1 + self.fee_rate)
             if estimated_cost > self.cash:
                 return "insufficient USDT cash"
             projected_market_value = self._market_value() + estimated_cost
@@ -279,6 +281,9 @@ class CryptoPaperBrokerExecutor:
             current = float(self.positions.get(order.symbol, {}).get("available", 0) or 0)
             if order.quantity > current:
                 return "insufficient crypto position; short selling is disabled"
+            notional = order.quantity * order.price
+            if self.max_order_notional > 0 and notional > self.max_order_notional:
+                return f"single order notional exceeds {self.max_order_notional} {self.quote_currency}"
         return ""
 
     def _planned_fill_quantity(self, order: CryptoPaperOrder) -> float:
@@ -336,8 +341,8 @@ class CryptoPaperBrokerExecutor:
                 if self.tp_manager is not None:
                     self.tp_manager.unregister_position(order.symbol)
 
-        order.filled_quantity = self._round_quantity(order.filled_quantity + quantity)
         order.filled_price = self._average_fill_price(order, quantity, fill_price)
+        order.filled_quantity = self._round_quantity(order.filled_quantity + quantity)
         order.fee += fee
         order.realized_pnl += realized_pnl
         order.filled_time = datetime.now()
@@ -438,21 +443,21 @@ class CryptoPaperBrokerExecutor:
             self.paper_logs = self.paper_logs[-max_entries:]
 
     def _generate_order_id(self, prefix: str) -> str:
-        return f"{prefix}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+        return f"{prefix}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}_{uuid4().hex[:8]}"
 
     def _round_quantity(self, value: Any) -> float:
-        try:
-            number = float(value or 0)
-        except (TypeError, ValueError):
-            number = 0.0
-        return round(number, self.quantity_precision)
+        return self._round_decimal(value, self.quantity_precision)
 
     def _round_price(self, value: Any) -> float:
+        return self._round_decimal(value, self.price_precision)
+
+    def _round_decimal(self, value: Any, precision: int) -> float:
         try:
-            number = float(value or 0)
-        except (TypeError, ValueError):
-            number = 0.0
-        return round(number, self.price_precision)
+            number = Decimal(str(value or 0))
+        except (InvalidOperation, ValueError):
+            number = Decimal("0")
+        quant = Decimal("1").scaleb(-max(0, int(precision or 0)))
+        return float(number.quantize(quant, rounding=ROUND_HALF_UP))
 
     def _setup_persistence(self) -> None:
         if not self.persistence_enabled:
