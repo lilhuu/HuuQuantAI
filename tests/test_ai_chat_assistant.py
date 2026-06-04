@@ -167,6 +167,27 @@ def test_ai_chat_provider_unavailable_when_disabled(tmp_path):
     assert _run(service.list_ai_chat_sessions()).total == 0
 
 
+def test_ai_chat_without_context_skips_market_fetch_and_hides_secrets(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-secret")
+    service = _service(tmp_path)
+    service.ai_chat_assistant.chat = MagicMock(return_value={"model": "gpt-5.2", "content": "仅基于问题给出模拟研究建议。"})
+
+    result = _run(
+        service.chat_ai_assistant(
+            AiChatRequest(message="不用上下文，解释一下回撤", symbol="BTC/USDT", include_context=False)
+        )
+    )
+
+    service.get_quotes.assert_not_called()
+    service.get_klines.assert_not_called()
+    context = service.ai_chat_assistant.chat.call_args.kwargs["context_summary"]
+    serialized_context = str(context)
+    assert "sk-test-secret" not in serialized_context
+    assert "OPENAI_API_KEY" not in serialized_context
+    assert context["ai_limits"]["real_trading_allowed"] is False
+    assert result.assistant_message.content.startswith("仅基于问题")
+
+
 def test_ai_chat_api_routes(tmp_path):
     service = _service(tmp_path)
     service.ai_chat_assistant.chat = MagicMock(return_value={"model": "gpt-5.2", "content": "模拟研究建议。"})
