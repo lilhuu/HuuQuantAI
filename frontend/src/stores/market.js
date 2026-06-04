@@ -111,7 +111,9 @@ export const useMarketStore = defineStore("trading-market", () => {
 
   const totalPages = computed(() => Math.max(1, Math.ceil(quotesTotal.value / quotePageSize.value)));
 
-  async function fetchCryptoSymbols({ quote, search, limit = 500, offset = 0 } = {}) {
+  async function fetchCryptoSymbols(options = {}) {
+    const { quote, search, limit = 500, offset = 0 } =
+      /** @type {{ quote?: string, search?: string, limit?: number, offset?: number }} */ (options);
     symbolLoading.value = true;
     try {
       const { data } = await apiClient.get("/crypto/symbols", { params: { quote, search, limit, offset } });
@@ -123,7 +125,9 @@ export const useMarketStore = defineStore("trading-market", () => {
     }
   }
 
-  async function fetchCryptoQuotes(symbols = null, { search, quote, limit, offset } = {}) {
+  async function fetchCryptoQuotes(symbols = null, options = {}) {
+    const { search, quote, limit, offset } =
+      /** @type {{ search?: string, quote?: string, limit?: number, offset?: number }} */ (options);
     const normalizedSymbols = symbols ? uniqueSymbols(symbols) : null;
     const params = {};
     if (normalizedSymbols && normalizedSymbols.length) {

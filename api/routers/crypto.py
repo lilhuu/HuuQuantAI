@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from api.dependencies import get_crypto_service
 from api.error_codes import ApiError, ErrorCode
 from api.models.request import (
+    AiChatRequest,
     AiSignalAnalyzeRequest,
     AutoTradingConfigRequest,
     BinanceTestnetCredentialsRequest,
@@ -21,6 +22,9 @@ from api.models.request import (
     PortfolioReturnsRequest,
 )
 from api.models.response import (
+    AiChatResponse,
+    AiChatSessionDetailResponse,
+    AiChatSessionListResponse,
     AiSignalAnalyzeResponse,
     AiSignalListResponse,
     AiSignalPaperOrderResponse,
@@ -275,6 +279,40 @@ async def analyze_crypto_ai_signal(
     service: CryptoService = Depends(get_crypto_service),
 ) -> AiSignalAnalyzeResponse:
     return await service.analyze_ai_signal(request)
+
+
+@router.post("/ai/chat", response_model=AiChatResponse, summary="Chat with the advisory-only AI assistant")
+async def chat_crypto_ai_assistant(
+    request: AiChatRequest,
+    service: CryptoService = Depends(get_crypto_service),
+) -> AiChatResponse:
+    return await service.chat_ai_assistant(request)
+
+
+@router.get("/ai/chat/sessions", response_model=AiChatSessionListResponse, summary="List AI chat sessions")
+async def list_crypto_ai_chat_sessions(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    service: CryptoService = Depends(get_crypto_service),
+) -> AiChatSessionListResponse:
+    return await service.list_ai_chat_sessions(limit=limit, offset=offset)
+
+
+@router.get("/ai/chat/sessions/{session_id}", response_model=AiChatSessionDetailResponse, summary="Get AI chat session")
+async def get_crypto_ai_chat_session(
+    session_id: str,
+    service: CryptoService = Depends(get_crypto_service),
+) -> AiChatSessionDetailResponse:
+    return await service.get_ai_chat_session(session_id)
+
+
+@router.delete("/ai/chat/sessions/{session_id}", response_model=MessageResponse, summary="Delete AI chat session")
+async def delete_crypto_ai_chat_session(
+    session_id: str,
+    service: CryptoService = Depends(get_crypto_service),
+) -> MessageResponse:
+    result = await service.delete_ai_chat_session(session_id)
+    return MessageResponse(success=bool(result.get("success")), message=str(result.get("message") or "AI chat session deleted"))
 
 
 @router.get("/ai/signals", response_model=AiSignalListResponse, summary="List AI advisory signals")

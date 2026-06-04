@@ -2,11 +2,14 @@
 import { computed, onBeforeUnmount, onErrorCaptured, onMounted, watch } from "vue";
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 
+import AiChatDrawer from "./components/AiChatDrawer.vue";
+import { useAiChatStore } from "./stores/aiChat";
 import { useAuthStore } from "./stores/auth";
 import { useAutoTradingStore } from "./stores/autoTrading";
 import { useTradingStore } from "./stores/trading";
 import { normalizeCryptoSymbol } from "./stores/tradingUtils";
 
+const aiChat = useAiChatStore();
 const authStore = useAuthStore();
 const autoStore = useAutoTradingStore();
 const store = useTradingStore();
@@ -18,7 +21,7 @@ const navItems = [
   { label: "市场分析", icon: "trend", to: "/market" },
   { label: "手动交易", icon: "clock", to: "/trade" },
   { label: "自动交易", icon: "target", to: "/auto" },
-  { label: "AI 助手", icon: "target", to: "/ai" },
+  { label: "AI 信号", icon: "target", to: "/ai" },
   { label: "账户状态", icon: "wallet", to: "/account" },
   { label: "组合分析", icon: "wallet", to: "/portfolio" },
   { label: "策略验证", icon: "flask", to: "/strategy" },
@@ -195,7 +198,8 @@ watch(
             <span>当前用户</span>
             <strong>{{ authStore.user?.username || "admin" }}</strong>
           </div>
-          <button class="cq-icon-button" title="刷新" @click="refreshWorkspace">刷新</button>
+          <button class="cq-accent-button" title="打开 AI 对话助手" @click="aiChat.openDrawer()">AI 对话</button>
+          <button class="cq-icon-button" title="刷新" @click="refreshWorkspace">刷</button>
           <button class="cq-outline-button" @click="logout">退出</button>
         </div>
       </header>
@@ -212,5 +216,7 @@ watch(
         <RouterView />
       </main>
     </section>
+
+    <AiChatDrawer />
   </div>
 </template>

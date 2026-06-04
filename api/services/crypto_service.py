@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from api.error_codes import ApiError, ErrorCode
 from api.models.request import (
+    AiChatRequest,
     AiSignalAnalyzeRequest,
     AutoTradingConfigRequest,
     BinanceTestnetCredentialsRequest,
@@ -24,6 +25,11 @@ from api.models.request import (
     PortfolioReturnsRequest,
 )
 from api.models.response import (
+    AiChatMessageResponse,
+    AiChatResponse,
+    AiChatSessionDetailResponse,
+    AiChatSessionListResponse,
+    AiChatSessionResponse,
     AiSignalAnalyzeResponse,
     AiSignalListResponse,
     AiSignalPaperOrderResponse,
@@ -72,6 +78,7 @@ from api.models.response import (
     WalkForwardSymbolSummaryResponse,
     WalkForwardConfigResponse,
 )
+from core.ai_chat_assistant import AiChatAssistant, AiChatStore
 from core.ai_signal_advisor import (
     AiAdvisorConfig,
     AiSignalAdvisor,
@@ -152,6 +159,8 @@ class CryptoService:
         self.ai_config = AiAdvisorConfig.from_dict(self.config.get("ai", {}) or {})
         self.ai_advisor = AiSignalAdvisor(self.ai_config)
         self.ai_store = AiSignalStore(storage_config.get("ai_signals_db_path") or sqlite_storage_path)
+        self.ai_chat_assistant = AiChatAssistant(self.ai_config)
+        self.ai_chat_store = AiChatStore(storage_config.get("ai_chat_db_path") or sqlite_storage_path)
         self._auto_scan_lock = asyncio.Lock()
         self._auto_loop_task: asyncio.Task | None = None
         self._auto_loop_consecutive_errors = 0
@@ -796,6 +805,75 @@ class CryptoService:
             order=order_response,
         )
 
+    async def chat_ai_assistant(self, request: AiChatRequest) -> AiChatResponse:
+        """Send one advisory-only AI chat message and persist the exchange."""
+        session_id = str(request.session_id or "").strip() or None
+        if session_id and not self.ai_chat_store.get_session_detail(session_id):
+            raise ApiError(404, "AI chat session not found", ErrorCode.RESOURCE_NOT_FOUND)
+
+        symbol = normalize_crypto_symbol(request.symbol, self.crypto_config.get("default_quote_currency", "USDT"))
+        context_summary = await self._build_ai_chat_context_summary(
+            symbol=symbol,
+            period=request.period,
+            limit=request.limit,
+            include_context=request.include_context,
+        )
+        recent_messages = self.ai_chat_store.list_messages(session_id, limit=12) if session_id else []
+        try:
+            assistant_payload = self.ai_chat_assistant.chat(
+                message=request.message,
+                context_summary=context_summary,
+                recent_messages=recent_messages,
+            )
+        except Exception as exc:
+            raise ApiError(
+                503,
+                f"AI provider unavailable: {exc}",
+                ErrorCode.AI_PROVIDER_UNAVAILABLE,
+            ) from exc
+
+        saved = self.ai_chat_store.save_exchange(
+            session_id=session_id,
+            title_seed=request.message,
+            user_content=request.message,
+            assistant_content=assistant_payload["content"],
+            model=assistant_payload.get("model", self.ai_config.model),
+            context_summary=context_summary,
+        )
+        if not saved:
+            raise ApiError(404, "AI chat session not found", ErrorCode.RESOURCE_NOT_FOUND)
+        return AiChatResponse(
+            session=self._ai_chat_session_response(saved["session"]),
+            user_message=self._ai_chat_message_response(saved["user_message"]),
+            assistant_message=self._ai_chat_message_response(saved["assistant_message"]),
+            context_summary=context_summary,
+        )
+
+    async def list_ai_chat_sessions(self, limit: int = 50, offset: int = 0) -> AiChatSessionListResponse:
+        page = self.ai_chat_store.list_sessions(limit=limit, offset=offset)
+        return AiChatSessionListResponse(
+            items=[self._ai_chat_session_response(item) for item in page["items"]],
+            count=page["count"],
+            total=page["total"],
+            limit=page["limit"],
+            offset=page["offset"],
+        )
+
+    async def get_ai_chat_session(self, session_id: str) -> AiChatSessionDetailResponse:
+        detail = self.ai_chat_store.get_session_detail(session_id)
+        if not detail:
+            raise ApiError(404, "AI chat session not found", ErrorCode.RESOURCE_NOT_FOUND)
+        return AiChatSessionDetailResponse(
+            session=self._ai_chat_session_response(detail["session"]),
+            messages=[self._ai_chat_message_response(item) for item in detail["messages"]],
+        )
+
+    async def delete_ai_chat_session(self, session_id: str) -> dict[str, Any]:
+        deleted = self.ai_chat_store.delete_session(session_id)
+        if not deleted:
+            raise ApiError(404, "AI chat session not found", ErrorCode.RESOURCE_NOT_FOUND)
+        return {"success": True, "message": "AI chat session deleted"}
+
     async def get_testnet_status(self) -> BinanceTestnetStatusResponse:
         return BinanceTestnetStatusResponse(**self.testnet_executor.status())
 
@@ -1105,8 +1183,65 @@ class CryptoService:
                 return float(position.get("available", position.get("quantity", 0)) or 0)
         return 0.0
 
+    async def _build_ai_chat_context_summary(
+        self,
+        *,
+        symbol: str,
+        period: str,
+        limit: int,
+        include_context: bool,
+    ) -> dict[str, Any]:
+        if not include_context:
+            return {
+                "symbol": symbol,
+                "period": period,
+                "ai_limits": {
+                    "mode": self.ai_config.mode,
+                    "manual_confirm_required": True,
+                    "auto_paper_order_enabled": False,
+                    "real_trading_allowed": False,
+                },
+            }
+
+        safe_limit = min(int(limit or 120), self.ai_config.max_context_candles)
+        quote_response = await self.get_quotes([symbol])
+        kline_response = await self.get_klines(symbol=symbol, period=period, limit=safe_limit)
+        account = self.paper_broker.get_account_info()
+        positions = self.paper_broker.get_positions()
+        recent_orders = self.paper_broker.get_orders(limit=20, offset=0)["items"]
+        macro = {}
+        try:
+            macro = (await self.get_macro_overview()).model_dump()
+        except Exception:
+            macro = {}
+        quote = quote_response.items[0].model_dump() if quote_response.items else {"symbol": symbol, "price": 0}
+        context = AiSignalContextBuilder.build(
+            symbol=symbol,
+            period=period,
+            quote=quote,
+            klines=[item.model_dump() for item in kline_response.items],
+            account=account,
+            positions=positions,
+            recent_orders=recent_orders,
+            risk_config=self.config.get("risk", {}) or {},
+            ai_config=self.ai_config,
+            macro=macro,
+        )
+        summary = AiSignalContextBuilder.summarize(context)
+        summary["advisory_only"] = True
+        summary["paper_order_allowed_by_ai"] = False
+        summary["testnet_order_allowed_by_ai"] = False
+        summary["real_order_allowed_by_ai"] = False
+        return summary
+
     def _ai_record_response(self, record: dict[str, Any]) -> AiSignalRecordResponse:
         return AiSignalRecordResponse(**record)
+
+    def _ai_chat_session_response(self, record: dict[str, Any]) -> AiChatSessionResponse:
+        return AiChatSessionResponse(**record)
+
+    def _ai_chat_message_response(self, record: dict[str, Any]) -> AiChatMessageResponse:
+        return AiChatMessageResponse(**record)
 
     async def get_connection_health(self) -> ConnectionHealthResponse:
         return ConnectionHealthResponse(**self.provider.get_connection_health())

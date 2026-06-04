@@ -115,6 +115,19 @@ auto_trading:
       parameters:
         position_ratio: 0.06
 
+ai:
+  enabled: false
+  provider: openai
+  model: gpt-5.2
+  fallback_model: gpt-5-mini
+  api_key_env: OPENAI_API_KEY
+  mode: advisory
+  manual_confirm_required: true
+  auto_paper_order_enabled: false
+  min_confidence_for_order: 0.65
+  max_context_candles: 120
+  max_order_notional: 300
+
 storage:
   db_path: data/trading.db
   csv_path: data/crypto_quotes.csv

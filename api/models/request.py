@@ -93,6 +93,33 @@ class AiSignalAnalyzeRequest(BaseModel):
         return normalized
 
 
+class AiChatRequest(BaseModel):
+    """Advisory AI chat request."""
+
+    session_id: str | None = Field(default=None, max_length=80)
+    message: str = Field(..., min_length=1, max_length=4000)
+    symbol: str = Field(default="BTC/USDT", min_length=1, max_length=32, examples=["BTC/USDT"])
+    period: Literal["1m", "5m", "15m", "1h", "4h", "1d"] = "1h"
+    limit: int = Field(default=120, ge=30, le=500)
+    include_context: bool = True
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_ai_chat_symbol(cls, value: str) -> str:
+        normalized = normalize_crypto_symbol(value)
+        if not normalized:
+            raise ValueError("symbol is required")
+        return normalized
+
+    @field_validator("message")
+    @classmethod
+    def strip_ai_chat_message(cls, value: str) -> str:
+        stripped = str(value or "").strip()
+        if not stripped:
+            raise ValueError("message is required")
+        return stripped
+
+
 class BinanceTestnetCredentialsRequest(BaseModel):
     """Local Binance Spot Testnet credential save request."""
 

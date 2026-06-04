@@ -599,6 +599,55 @@ class AiSignalPaperOrderResponse(BaseModel):
     order: CryptoPaperOrderResponse | None = None
 
 
+class AiChatMessageResponse(BaseModel):
+    """One persisted AI chat message."""
+
+    message_id: str = ""
+    session_id: str = ""
+    role: str = "assistant"
+    content: str = ""
+    model: str = ""
+    context_summary: dict[str, Any] = Field(default_factory=dict)
+    created_at: str = ""
+
+
+class AiChatSessionResponse(BaseModel):
+    """AI chat session summary."""
+
+    session_id: str = ""
+    title: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+    message_count: int = 0
+    last_message: str = ""
+
+
+class AiChatResponse(BaseModel):
+    """AI chat assistant response."""
+
+    session: AiChatSessionResponse
+    user_message: AiChatMessageResponse
+    assistant_message: AiChatMessageResponse
+    context_summary: dict[str, Any] = Field(default_factory=dict)
+
+
+class AiChatSessionListResponse(BaseModel):
+    """AI chat session history page."""
+
+    items: list[AiChatSessionResponse] = Field(default_factory=list)
+    count: int = 0
+    total: int = 0
+    limit: int = 50
+    offset: int = 0
+
+
+class AiChatSessionDetailResponse(BaseModel):
+    """AI chat session detail with messages."""
+
+    session: AiChatSessionResponse
+    messages: list[AiChatMessageResponse] = Field(default_factory=list)
+
+
 class BinanceTestnetStatusResponse(BaseModel):
     """Binance Spot Testnet safety status."""
 
