@@ -5,13 +5,15 @@ import { pinia } from "../stores/pinia";
 
 const AccountView = () => import("../views/AccountView.vue");
 const AiAdvisorView = () => import("../views/AiAdvisorView.vue");
+const AuditView = () => import("../views/AuditView.vue");
 const AutoTradingView = () => import("../views/AutoTradingView.vue");
 const AuthView = () => import("../views/AuthView.vue");
 const DashboardView = () => import("../views/DashboardView.vue");
+const DiagnosticsView = () => import("../views/DiagnosticsView.vue");
 const MarketView = () => import("../views/MarketView.vue");
 const PortfolioView = () => import("../views/PortfolioView.vue");
 const ReliabilityView = () => import("../views/ReliabilityView.vue");
-const RiskView = () => import("../views/RiskView.vue");
+const SettingsView = () => import("../views/SettingsView.vue");
 const StrategyView = () => import("../views/StrategyView.vue");
 const TradeView = () => import("../views/TradeView.vue");
 const WorkbenchLayout = () => import("../layouts/WorkbenchLayout.vue");
@@ -87,19 +89,19 @@ const router = createRouter({
         {
           path: "audit",
           name: "audit",
-          component: RiskView,
+          component: AuditView,
           meta: { title: "监控审计", requiresAuth: true },
         },
         {
           path: "diagnostics",
           name: "diagnostics",
-          component: StrategyView,
+          component: DiagnosticsView,
           meta: { title: "策略诊断", requiresAuth: true },
         },
         {
           path: "settings",
           name: "settings",
-          component: AccountView,
+          component: SettingsView,
           meta: { title: "系统设置", requiresAuth: true },
         },
       ],
