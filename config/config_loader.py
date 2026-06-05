@@ -9,6 +9,7 @@ from core.credential_manager import resolve_env_placeholders
 from core.desktop_paths import (
     apply_desktop_trading_config_paths,
     get_runtime_overrides_path as get_desktop_runtime_overrides_path,
+    resource_path,
 )
 from core.file_lock import read_text_locked
 
@@ -25,6 +26,23 @@ def _deep_merge(base: Dict, override: Dict) -> Dict:
         else:
             merged[key] = value
     return merged
+
+
+def _load_yaml_file(path: Path) -> Dict:
+    with path.open("r", encoding="utf-8") as file_obj:
+        return yaml.safe_load(file_obj) or {}
+
+
+def _merge_bundled_defaults(config: Dict, config_path: Path) -> Dict:
+    """Fill missing keys from the bundled config shipped with the app."""
+    bundled_path = resource_path("config", config_path.name)
+    try:
+        if not bundled_path.exists() or bundled_path.resolve() == config_path.resolve():
+            return config
+    except OSError:
+        return config
+    defaults = _load_yaml_file(bundled_path)
+    return _deep_merge(defaults, config)
 
 
 def _validate_raw_config_security(config: Dict, path: tuple[str, ...] = ()) -> None:
@@ -59,8 +77,7 @@ def load_config(config_path: str = "config/config.yaml") -> Dict:
     if not path.exists():
         raise FileNotFoundError(f"配置文件不存在: {config_path}")
 
-    with path.open("r", encoding="utf-8") as file_obj:
-        config = yaml.safe_load(file_obj) or {}
+    config = _merge_bundled_defaults(_load_yaml_file(path), path)
 
     overrides_path = get_runtime_overrides_path(config_path)
     overrides_content = read_text_locked(overrides_path, default="") or ""
