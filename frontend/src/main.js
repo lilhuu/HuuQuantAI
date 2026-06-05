@@ -4,7 +4,7 @@ import App from "./App.vue";
 import { useToast } from "./composables/useToast";
 import router from "./router";
 import { pinia } from "./stores/pinia";
-import "./styles.css";
+import "./styles/index.css";
 
 const app = createApp(App);
 
