@@ -1,4 +1,5 @@
 import asyncio
+import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -11,6 +12,7 @@ from api.main import app
 from api.models.request import AiChatRequest
 from api.models.response import CryptoKLineResponse, CryptoKLinesResponse, CryptoQuoteResponse, CryptoQuotesResponse
 from api.services.crypto_service import CryptoService
+from core.ai_chat_assistant import AiChatAssistant
 
 
 def _quote(symbol="BTC/USDT"):
@@ -165,6 +167,43 @@ def test_ai_chat_provider_unavailable_when_disabled(tmp_path):
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail["error_code"] == ErrorCode.AI_PROVIDER_UNAVAILABLE
     assert _run(service.list_ai_chat_sessions()).total == 0
+
+
+def test_deepseek_chat_provider_uses_chat_completions(monkeypatch):
+    captured = {}
+
+    class FakeChatCompletions:
+        def create(self, **kwargs):
+            captured["request"] = kwargs
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="这是 DeepSeek 模拟研究建议。"))]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, *, api_key, base_url=None):
+            captured["api_key"] = api_key
+            captured["base_url"] = base_url
+            self.chat = SimpleNamespace(completions=FakeChatCompletions())
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-test-key")
+
+    assistant = AiChatAssistant(
+        {
+            "enabled": True,
+            "provider": "deepseek",
+            "model": "deepseek-chat",
+            "fallback_model": "deepseek-chat",
+            "api_key_env": "DEEPSEEK_API_KEY",
+            "base_url": "https://api.deepseek.com",
+        }
+    )
+    result = assistant.chat(message="分析 BTC", context_summary={"symbol": "BTC/USDT"})
+
+    assert result == {"model": "deepseek-chat", "content": "这是 DeepSeek 模拟研究建议。"}
+    assert captured["api_key"] == "deepseek-test-key"
+    assert captured["base_url"] == "https://api.deepseek.com"
+    assert captured["request"]["model"] == "deepseek-chat"
 
 
 def test_ai_chat_without_context_skips_market_fetch_and_hides_secrets(monkeypatch, tmp_path):

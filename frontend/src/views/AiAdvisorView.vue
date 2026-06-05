@@ -40,7 +40,7 @@ onMounted(() => {
 <template>
   <section class="cq-page-head">
     <h1>AI 助手</h1>
-    <p>OpenAI 只生成加密货币交易建议。真实交易关闭，必须手动确认后才可生成模拟订单。</p>
+    <p>AI 模型只生成加密货币交易建议。真实交易关闭，必须手动确认后才可生成模拟订单。</p>
   </section>
 
   <section class="cq-dashboard-grid">

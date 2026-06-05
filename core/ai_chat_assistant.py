@@ -27,7 +27,7 @@ CHAT_SYSTEM_PROMPT = (
 
 
 class AiChatAssistant:
-    """OpenAI-backed natural-language assistant.
+    """Provider-backed natural-language assistant.
 
     The class only returns text. It does not expose tools and cannot execute
     paper, testnet, or real orders.
@@ -45,11 +45,11 @@ class AiChatAssistant:
     ) -> dict[str, Any]:
         if not self.config.enabled:
             raise RuntimeError("AI assistant is disabled in config")
-        if self.config.provider != "openai":
+        if self.config.provider not in {"openai", "deepseek"}:
             raise RuntimeError(f"unsupported AI provider: {self.config.provider}")
         api_key = os.environ.get(self.config.api_key_env, "").strip()
         if not api_key:
-            raise RuntimeError(f"missing OpenAI API key env: {self.config.api_key_env}")
+            raise RuntimeError(f"missing {self._provider_label()} API key env: {self.config.api_key_env}")
 
         payload = {
             "user_message": str(message or "").strip(),
@@ -72,19 +72,35 @@ class AiChatAssistant:
         }
 
         last_error: Exception | None = None
-        for model in [self.config.model, self.config.fallback_model]:
+        for model in self._candidate_models():
             if not model:
                 continue
             try:
-                content = self._call_openai(api_key=api_key, model=model, payload=payload)
+                content = self._call_provider(api_key=api_key, model=model, payload=payload)
                 if not content.strip():
-                    raise ValueError("OpenAI chat response was empty")
+                    raise ValueError(f"{self._provider_label()} chat response was empty")
                 return {"model": model, "content": content.strip()}
             except Exception as exc:  # pragma: no cover - covered by service tests with monkeypatches.
                 last_error = exc
                 if model == self.config.fallback_model:
                     break
-        raise RuntimeError(f"OpenAI AI chat request failed: {last_error}")
+        raise RuntimeError(f"{self._provider_label()} AI chat request failed: {last_error}")
+
+    def _candidate_models(self) -> list[str]:
+        candidates: list[str] = []
+        for model in [self.config.model, self.config.fallback_model]:
+            model_text = str(model or "").strip()
+            if model_text and model_text not in candidates:
+                candidates.append(model_text)
+        return candidates
+
+    def _provider_label(self) -> str:
+        return "DeepSeek" if self.config.provider == "deepseek" else "OpenAI"
+
+    def _call_provider(self, *, api_key: str, model: str, payload: dict[str, Any]) -> str:
+        if self.config.provider == "deepseek":
+            return self._call_deepseek(api_key=api_key, model=model, payload=payload)
+        return self._call_openai(api_key=api_key, model=model, payload=payload)
 
     def _call_openai(self, *, api_key: str, model: str, payload: dict[str, Any]) -> str:
         from openai import OpenAI
@@ -96,6 +112,24 @@ class AiChatAssistant:
             input=safe_json(payload),
         )
         return getattr(response, "output_text", "") or self._extract_output_text(response)
+
+    def _call_deepseek(self, *, api_key: str, model: str, payload: dict[str, Any]) -> str:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key, base_url=self.config.base_url or "https://api.deepseek.com")
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": CHAT_SYSTEM_PROMPT},
+                {"role": "user", "content": safe_json(payload)},
+            ],
+            temperature=0.2,
+        )
+        choices = getattr(response, "choices", []) or []
+        if not choices:
+            raise ValueError("DeepSeek chat response did not include choices")
+        message = getattr(choices[0], "message", None)
+        return str(getattr(message, "content", "") if message else "")
 
     def _extract_output_text(self, response: Any) -> str:
         parts: list[str] = []

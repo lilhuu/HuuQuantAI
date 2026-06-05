@@ -63,6 +63,7 @@ class AiAdvisorConfig:
     model: str = "gpt-5.2"
     fallback_model: str = "gpt-5-mini"
     api_key_env: str = "OPENAI_API_KEY"
+    base_url: str = ""
     mode: str = "advisory"
     manual_confirm_required: bool = True
     auto_paper_order_enabled: bool = False
@@ -79,6 +80,7 @@ class AiAdvisorConfig:
             model=str(data.get("model") or "gpt-5.2"),
             fallback_model=str(data.get("fallback_model") or "gpt-5-mini"),
             api_key_env=str(data.get("api_key_env") or "OPENAI_API_KEY"),
+            base_url=str(data.get("base_url") or ""),
             mode=str(data.get("mode") or "advisory"),
             manual_confirm_required=bool(data.get("manual_confirm_required", True)),
             auto_paper_order_enabled=bool(data.get("auto_paper_order_enabled", False)),
@@ -170,7 +172,7 @@ class AiSignalContextBuilder:
 
 
 class AiSignalAdvisor:
-    """OpenAI-backed structured crypto signal advisor."""
+    """Provider-backed structured crypto signal advisor."""
 
     def __init__(self, config: dict[str, Any] | AiAdvisorConfig | None = None) -> None:
         self.config = config if isinstance(config, AiAdvisorConfig) else AiAdvisorConfig.from_dict(config)
@@ -178,18 +180,18 @@ class AiSignalAdvisor:
     def analyze(self, context: dict[str, Any]) -> dict[str, Any]:
         if not self.config.enabled:
             raise RuntimeError("AI advisor is disabled in config")
-        if self.config.provider != "openai":
+        if self.config.provider not in {"openai", "deepseek"}:
             raise RuntimeError(f"unsupported AI provider: {self.config.provider}")
         api_key = os.environ.get(self.config.api_key_env, "").strip()
         if not api_key:
-            raise RuntimeError(f"missing OpenAI API key env: {self.config.api_key_env}")
+            raise RuntimeError(f"missing {self._provider_label()} API key env: {self.config.api_key_env}")
 
         last_error: Exception | None = None
-        for model in [self.config.model, self.config.fallback_model]:
+        for model in self._candidate_models():
             if not model:
                 continue
             try:
-                payload = self._call_openai(api_key=api_key, model=model, context=context)
+                payload = self._call_provider(api_key=api_key, model=model, context=context)
                 validated = validate_ai_advice(payload, expected_symbol=str(context.get("symbol") or ""))
                 validated["model"] = model
                 return validated
@@ -197,7 +199,23 @@ class AiSignalAdvisor:
                 last_error = exc
                 if model == self.config.fallback_model:
                     break
-        raise RuntimeError(f"OpenAI AI signal request failed: {last_error}")
+        raise RuntimeError(f"{self._provider_label()} AI signal request failed: {last_error}")
+
+    def _candidate_models(self) -> list[str]:
+        candidates: list[str] = []
+        for model in [self.config.model, self.config.fallback_model]:
+            model_text = str(model or "").strip()
+            if model_text and model_text not in candidates:
+                candidates.append(model_text)
+        return candidates
+
+    def _provider_label(self) -> str:
+        return "DeepSeek" if self.config.provider == "deepseek" else "OpenAI"
+
+    def _call_provider(self, *, api_key: str, model: str, context: dict[str, Any]) -> dict[str, Any]:
+        if self.config.provider == "deepseek":
+            return self._call_deepseek(api_key=api_key, model=model, context=context)
+        return self._call_openai(api_key=api_key, model=model, context=context)
 
     def _call_openai(self, *, api_key: str, model: str, context: dict[str, Any]) -> dict[str, Any]:
         from openai import OpenAI
@@ -219,6 +237,28 @@ class AiSignalAdvisor:
         output_text = getattr(response, "output_text", "") or self._extract_output_text(response)
         if not output_text:
             raise ValueError("OpenAI response did not include output_text")
+        return json.loads(output_text)
+
+    def _call_deepseek(self, *, api_key: str, model: str, context: dict[str, Any]) -> dict[str, Any]:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key, base_url=self.config.base_url or "https://api.deepseek.com")
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": self._system_prompt()},
+                {"role": "user", "content": safe_json(context)},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.2,
+        )
+        choices = getattr(response, "choices", []) or []
+        if not choices:
+            raise ValueError("DeepSeek response did not include choices")
+        message = getattr(choices[0], "message", None)
+        output_text = getattr(message, "content", "") if message else ""
+        if not output_text:
+            raise ValueError("DeepSeek response did not include message content")
         return json.loads(output_text)
 
     def _system_prompt(self) -> str:

@@ -1,4 +1,6 @@
 import asyncio
+import json
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +11,7 @@ from api.error_codes import ApiError, ErrorCode
 from api.main import app
 from api.models.request import AiSignalAnalyzeRequest
 from api.services.crypto_service import CryptoService
+from core.ai_signal_advisor import AiSignalAdvisor
 from core.crypto_market_data_provider import CryptoMarketDataProvider
 
 
@@ -178,6 +181,63 @@ def test_ai_provider_unavailable_when_api_key_missing(monkeypatch, tmp_path):
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail["error_code"] == ErrorCode.AI_PROVIDER_UNAVAILABLE
+
+
+def test_deepseek_signal_provider_uses_chat_completions(monkeypatch):
+    captured = {}
+
+    class FakeChatCompletions:
+        def create(self, **kwargs):
+            captured["request"] = kwargs
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=json.dumps(
+                                {
+                                    "symbol": "BTC/USDT",
+                                    "action": "HOLD",
+                                    "confidence": 0.72,
+                                    "suggested_notional_usdt": 0,
+                                    "max_loss_usdt": 0,
+                                    "time_horizon": "1h",
+                                    "reason": "No clear edge.",
+                                    "risk_notes": ["Volatility remains elevated."],
+                                    "invalid_if": ["Momentum improves with volume."],
+                                }
+                            )
+                        )
+                    )
+                ]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, *, api_key, base_url=None):
+            captured["api_key"] = api_key
+            captured["base_url"] = base_url
+            self.chat = SimpleNamespace(completions=FakeChatCompletions())
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-test-key")
+
+    advisor = AiSignalAdvisor(
+        {
+            "enabled": True,
+            "provider": "deepseek",
+            "model": "deepseek-chat",
+            "fallback_model": "deepseek-chat",
+            "api_key_env": "DEEPSEEK_API_KEY",
+            "base_url": "https://api.deepseek.com",
+        }
+    )
+    result = advisor.analyze({"symbol": "BTC/USDT"})
+
+    assert result["action"] == "HOLD"
+    assert result["model"] == "deepseek-chat"
+    assert captured["api_key"] == "deepseek-test-key"
+    assert captured["base_url"] == "https://api.deepseek.com"
+    assert captured["request"]["model"] == "deepseek-chat"
+    assert captured["request"]["response_format"] == {"type": "json_object"}
 
 
 def test_ai_signal_api_routes(monkeypatch, tmp_path):

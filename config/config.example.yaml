@@ -117,10 +117,11 @@ auto_trading:
 
 ai:
   enabled: false
-  provider: openai
-  model: gpt-5.2
-  fallback_model: gpt-5-mini
-  api_key_env: OPENAI_API_KEY
+  provider: deepseek
+  model: deepseek-chat
+  fallback_model: deepseek-chat
+  api_key_env: DEEPSEEK_API_KEY
+  base_url: https://api.deepseek.com
   mode: advisory
   manual_confirm_required: true
   auto_paper_order_enabled: false
