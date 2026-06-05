@@ -192,18 +192,18 @@ def test_deepseek_chat_provider_uses_chat_completions(monkeypatch):
         {
             "enabled": True,
             "provider": "deepseek",
-            "model": "deepseek-chat",
-            "fallback_model": "deepseek-chat",
+            "model": "deepseek-v4-flash",
+            "fallback_model": "deepseek-v4-flash",
             "api_key_env": "DEEPSEEK_API_KEY",
             "base_url": "https://api.deepseek.com",
         }
     )
     result = assistant.chat(message="分析 BTC", context_summary={"symbol": "BTC/USDT"})
 
-    assert result == {"model": "deepseek-chat", "content": "这是 DeepSeek 模拟研究建议。"}
+    assert result == {"model": "deepseek-v4-flash", "content": "这是 DeepSeek 模拟研究建议。"}
     assert captured["api_key"] == "deepseek-test-key"
     assert captured["base_url"] == "https://api.deepseek.com"
-    assert captured["request"]["model"] == "deepseek-chat"
+    assert captured["request"]["model"] == "deepseek-v4-flash"
 
 
 def test_ai_chat_without_context_skips_market_fetch_and_hides_secrets(monkeypatch, tmp_path):

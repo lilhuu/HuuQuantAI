@@ -224,8 +224,8 @@ def test_deepseek_signal_provider_uses_chat_completions(monkeypatch):
         {
             "enabled": True,
             "provider": "deepseek",
-            "model": "deepseek-chat",
-            "fallback_model": "deepseek-chat",
+            "model": "deepseek-v4-flash",
+            "fallback_model": "deepseek-v4-flash",
             "api_key_env": "DEEPSEEK_API_KEY",
             "base_url": "https://api.deepseek.com",
         }
@@ -233,10 +233,10 @@ def test_deepseek_signal_provider_uses_chat_completions(monkeypatch):
     result = advisor.analyze({"symbol": "BTC/USDT"})
 
     assert result["action"] == "HOLD"
-    assert result["model"] == "deepseek-chat"
+    assert result["model"] == "deepseek-v4-flash"
     assert captured["api_key"] == "deepseek-test-key"
     assert captured["base_url"] == "https://api.deepseek.com"
-    assert captured["request"]["model"] == "deepseek-chat"
+    assert captured["request"]["model"] == "deepseek-v4-flash"
     assert captured["request"]["response_format"] == {"type": "json_object"}
 
 

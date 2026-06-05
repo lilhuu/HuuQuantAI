@@ -118,8 +118,8 @@ auto_trading:
 ai:
   enabled: false
   provider: deepseek
-  model: deepseek-chat
-  fallback_model: deepseek-chat
+  model: deepseek-v4-flash
+  fallback_model: deepseek-v4-flash
   api_key_env: DEEPSEEK_API_KEY
   base_url: https://api.deepseek.com
   mode: advisory
