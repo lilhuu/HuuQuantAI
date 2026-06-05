@@ -13,9 +13,14 @@ const symbol = ref(normalizeCryptoSymbol(trading.selectedCryptoSymbol || "BTC/US
 const period = ref(trading.selectedCryptoPeriod || "1h");
 const limit = ref(120);
 const includeContext = ref(true);
+const selectedModel = ref("deepseek-v4-flash");
 const messageList = ref(null);
 
 const periodOptions = ["1m", "5m", "15m", "1h", "4h", "1d"];
+const modelOptions = [
+  { label: "Flash", value: "deepseek-v4-flash" },
+  { label: "Pro", value: "deepseek-v4-pro" },
+];
 const pairOptions = computed(() => {
   const base = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "DOGE/USDT", ...trading.cryptoWatchSymbols];
   return [...new Set(base.map((item) => normalizeCryptoSymbol(item)).filter(Boolean))];
@@ -43,6 +48,7 @@ async function send() {
     period: period.value,
     limit: limit.value,
     include_context: includeContext.value,
+    model: selectedModel.value,
   });
   scrollToBottom();
 }
@@ -163,7 +169,19 @@ watch(
                 placeholder="例如：结合当前 BTC/USDT 1h K 线，帮我分析模拟交易风险"
                 @keydown="handleKeydown"
               ></textarea>
-              <div>
+              <div class="ai-chat-actions">
+                <div class="ai-chat-model-switch" aria-label="模型选择">
+                  <button
+                    v-for="option in modelOptions"
+                    :key="option.value"
+                    type="button"
+                    :class="{ active: selectedModel === option.value }"
+                    :title="`使用 ${option.label} 模型回复`"
+                    @click="selectedModel = option.value"
+                  >
+                    {{ option.label }}
+                  </button>
+                </div>
                 <button
                   class="cq-outline-button"
                   :disabled="!aiChat.currentSession"

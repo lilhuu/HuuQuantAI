@@ -158,6 +158,24 @@ def test_ai_chat_can_continue_and_delete_session(tmp_path):
         _run(service.get_ai_chat_session(first.session.session_id))
 
 
+def test_ai_chat_passes_selected_model_to_assistant(tmp_path):
+    service = _service(tmp_path)
+    service.ai_chat_assistant.chat = MagicMock(return_value={"model": "deepseek-v4-pro", "content": "Pro reply"})
+
+    response = _run(
+        service.chat_ai_assistant(
+            AiChatRequest(
+                message="Analyze BTC risk",
+                symbol="BTC/USDT",
+                model="deepseek-v4-pro",
+            )
+        )
+    )
+
+    assert service.ai_chat_assistant.chat.call_args.kwargs["model"] == "deepseek-v4-pro"
+    assert response.assistant_message.model == "deepseek-v4-pro"
+
+
 def test_ai_chat_provider_unavailable_when_disabled(tmp_path):
     service = _service(tmp_path, ai_enabled=False)
 

@@ -44,6 +44,7 @@ export const useAiChatStore = defineStore("ai-chat", () => {
       const { data } = await apiClient.post("/crypto/ai/chat", {
         session_id: currentSession.value?.session_id || null,
         message,
+        ...(payload.model ? { model: payload.model } : {}),
         symbol: normalizeCryptoSymbol(payload.symbol || "BTC/USDT"),
         period: payload.period || "1h",
         limit: Number(payload.limit || 120),

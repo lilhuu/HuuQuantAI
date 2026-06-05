@@ -98,6 +98,7 @@ class AiChatRequest(BaseModel):
 
     session_id: str | None = Field(default=None, max_length=80)
     message: str = Field(..., min_length=1, max_length=4000)
+    model: Literal["deepseek-v4-flash", "deepseek-v4-pro"] | None = Field(default=None)
     symbol: str = Field(default="BTC/USDT", min_length=1, max_length=32, examples=["BTC/USDT"])
     period: Literal["1m", "5m", "15m", "1h", "4h", "1d"] = "1h"
     limit: int = Field(default=120, ge=30, le=500)

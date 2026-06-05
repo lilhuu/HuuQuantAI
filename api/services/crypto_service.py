@@ -824,6 +824,7 @@ class CryptoService:
                 message=request.message,
                 context_summary=context_summary,
                 recent_messages=recent_messages,
+                model=request.model,
             )
         except Exception as exc:
             raise ApiError(

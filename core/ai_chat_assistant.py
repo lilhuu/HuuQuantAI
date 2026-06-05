@@ -42,6 +42,7 @@ class AiChatAssistant:
         message: str,
         context_summary: dict[str, Any],
         recent_messages: list[dict[str, Any]] | None = None,
+        model: str | None = None,
     ) -> dict[str, Any]:
         if not self.config.enabled:
             raise RuntimeError("AI assistant is disabled in config")
@@ -72,21 +73,23 @@ class AiChatAssistant:
         }
 
         last_error: Exception | None = None
-        for model in self._candidate_models():
-            if not model:
+        for candidate_model in self._candidate_models(model):
+            if not candidate_model:
                 continue
             try:
-                content = self._call_provider(api_key=api_key, model=model, payload=payload)
+                content = self._call_provider(api_key=api_key, model=candidate_model, payload=payload)
                 if not content.strip():
                     raise ValueError(f"{self._provider_label()} chat response was empty")
-                return {"model": model, "content": content.strip()}
+                return {"model": candidate_model, "content": content.strip()}
             except Exception as exc:  # pragma: no cover - covered by service tests with monkeypatches.
                 last_error = exc
-                if model == self.config.fallback_model:
+                if model or candidate_model == self.config.fallback_model:
                     break
         raise RuntimeError(f"{self._provider_label()} AI chat request failed: {last_error}")
 
-    def _candidate_models(self) -> list[str]:
+    def _candidate_models(self, selected_model: str | None = None) -> list[str]:
+        if selected_model:
+            return [str(selected_model).strip()]
         candidates: list[str] = []
         for model in [self.config.model, self.config.fallback_model]:
             model_text = str(model or "").strip()

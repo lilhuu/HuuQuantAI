@@ -59,4 +59,27 @@ describe("aiChat store", () => {
     expect(store.messages).toEqual([]);
     expect(apiClient.delete).toHaveBeenCalledWith("/crypto/ai/chat/sessions/AICHAT_1");
   });
+
+  it("sends the selected DeepSeek model when provided", async () => {
+    vi.spyOn(apiClient, "post").mockResolvedValueOnce({
+      data: {
+        session: { session_id: "AICHAT_2", title: "model", message_count: 2 },
+        user_message: { message_id: "U2", role: "user", content: "Analyze BTC" },
+        assistant_message: { message_id: "A2", role: "assistant", content: "Pro reply", model: "deepseek-v4-pro" },
+      },
+    });
+    vi.spyOn(apiClient, "get").mockResolvedValueOnce({ data: { items: [], total: 0 } });
+
+    const store = useAiChatStore();
+    await store.sendMessage({
+      message: "Analyze BTC",
+      symbol: "BTC/USDT",
+      model: "deepseek-v4-pro",
+    });
+
+    expect(apiClient.post).toHaveBeenCalledWith(
+      "/crypto/ai/chat",
+      expect.objectContaining({ model: "deepseek-v4-pro" }),
+    );
+  });
 });
