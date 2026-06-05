@@ -3,6 +3,8 @@ import { computed, onBeforeUnmount, onErrorCaptured, onMounted, watch } from "vu
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 
 import AiChatDrawer from "../components/AiChatDrawer.vue";
+import { useBoot } from "../composables/useBoot";
+import { useToast } from "../composables/useToast";
 import { useAiChatStore } from "../stores/aiChat";
 import { useAuthStore } from "../stores/auth";
 import { useAutoTradingStore } from "../stores/autoTrading";
@@ -15,6 +17,8 @@ const autoStore = useAutoTradingStore();
 const store = useTradingStore();
 const route = useRoute();
 const router = useRouter();
+const { errorInfo: toastErrorInfo, setError: setToastError, clearError: clearToastError } = useToast();
+const { initializeWorkbench, teardownWorkbench } = useBoot();
 
 const navItems = [
   { label: "仪表盘", icon: "grid", to: "/" },
@@ -44,20 +48,7 @@ const selectedQuote = computed(() => {
 const priceText = computed(() => store.formatPrice(selectedQuote.value?.price || 0));
 const changeText = computed(() => store.formatPercent((selectedQuote.value?.change || 0) * 100));
 const changeClass = computed(() => (Number(selectedQuote.value?.change || 0) >= 0 ? "number-up" : "number-down"));
-
-async function initializeWorkbench() {
-  if (!authStore.isAuthenticated) {
-    return;
-  }
-  try {
-    await authStore.ensureInitialized();
-    await store.loadUserPreferences();
-    await Promise.allSettled([store.bootstrap(), autoStore.fetchStatus()]);
-    store.connectRealtimeStreams();
-  } catch (error) {
-    store.setError(error, "初始化 HuuQuantAI 工作台失败");
-  }
-}
+const visibleErrorInfo = computed(() => toastErrorInfo.value || store.errorInfo);
 
 async function changeSymbol() {
   const symbol = normalizeCryptoSymbol(store.selectedCryptoSymbol);
@@ -89,8 +80,7 @@ async function refreshWorkspace() {
 }
 
 async function logout() {
-  store.disconnectRealtimeStreams();
-  store.resetState();
+  teardownWorkbench({ reset: true });
   await authStore.logout();
   router.push({ name: "auth" });
 }
@@ -100,7 +90,7 @@ function handleUserInteraction() {
 }
 
 onErrorCaptured((error, _instance, info) => {
-  store.setError(error, `界面组件异常：${info || "未知位置"}`);
+  setToastError(error, `界面组件异常：${info || "未知位置"}`);
   return false;
 });
 
@@ -114,7 +104,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("pointerdown", handleUserInteraction);
-  store.disconnectRealtimeStreams();
+  teardownWorkbench();
 });
 
 watch(
@@ -124,11 +114,15 @@ watch(
       await initializeWorkbench();
     }
     if (!nextValue && previousValue) {
-      store.disconnectRealtimeStreams();
-      store.resetState();
+      teardownWorkbench({ reset: true });
     }
   },
 );
+
+function clearVisibleError() {
+  clearToastError();
+  store.clearError();
+}
 </script>
 
 <template>
@@ -201,12 +195,12 @@ watch(
         </div>
       </header>
 
-      <section v-if="store.errorInfo" class="cq-error">
+      <section v-if="visibleErrorInfo" class="cq-error">
         <div>
-          <strong>{{ store.errorInfo.title }}</strong>
-          <p>{{ store.errorInfo.message }}</p>
+          <strong>{{ visibleErrorInfo.title }}</strong>
+          <p>{{ visibleErrorInfo.message }}</p>
         </div>
-        <button class="cq-outline-button" @click="store.clearError()">知道了</button>
+        <button class="cq-outline-button" @click="clearVisibleError">知道了</button>
       </section>
 
       <main class="cq-content">

@@ -15,6 +15,6 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src/lib/**/*.js", "src/stores/**/*.js"],
+  "include": ["src/composables/**/*.js", "src/lib/**/*.js", "src/stores/**/*.js"],
   "exclude": ["node_modules", "dist"]
 }
