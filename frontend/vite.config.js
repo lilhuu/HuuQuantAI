@@ -8,7 +8,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           vue: ["vue", "vue-router", "pinia"],
-          charts: ["chart.js", "vue-chartjs", "lightweight-charts"],
+          charts: ["lightweight-charts"],
           http: ["axios"],
         },
       },

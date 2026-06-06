@@ -1,8 +1,6 @@
 <script setup>
-import { onMounted, onUnmounted, ref, watch } from "vue";
-import { Chart, registerables } from "chart.js";
-
-Chart.register(...registerables);
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { LineSeries, createChart } from "lightweight-charts";
 
 const props = defineProps({
   equityCurve: { type: Array, default: () => [] },
@@ -10,144 +8,128 @@ const props = defineProps({
   height: { type: Number, default: 280 },
 });
 
-const canvasRef = ref(null);
-let chartInstance = null;
+const chartEl = ref(null);
+let chart = null;
+let equitySeries = null;
+let drawdownSeries = null;
+let resizeObserver = null;
 
-function buildChartData() {
-  const equity = props.equityCurve || [];
-  const drawdown = props.drawdownCurve || [];
-  const labels = (equity.length ? equity : drawdown).map((point) => point.timestamp || "");
+const hasData = computed(() => Boolean(props.equityCurve?.length || props.drawdownCurve?.length));
 
-  return {
-    labels,
-    datasets: [
-      {
-        label: "权益曲线",
-        data: equity.map((point) => point.equity ?? 0),
-        borderColor: "#13d6d6",
-        backgroundColor: "rgba(19, 214, 214, 0.08)",
-        fill: true,
-        tension: 0.28,
-        pointRadius: 0,
-        borderWidth: 2,
-        yAxisID: "y",
-      },
-      {
-        label: "回撤",
-        data: drawdown.map((point) => (point.drawdown ?? 0) * 100),
-        borderColor: "#ff6b6b",
-        backgroundColor: "rgba(255, 107, 107, 0.08)",
-        fill: true,
-        tension: 0.28,
-        pointRadius: 0,
-        borderWidth: 1.5,
-        yAxisID: "y1",
-      },
-    ],
-  };
+const equityRows = computed(() =>
+  normalizeSeries(props.equityCurve, "equity").filter((item) => Number.isFinite(item.value)),
+);
+
+const drawdownRows = computed(() =>
+  normalizeSeries(props.drawdownCurve, "drawdown")
+    .map((item) => ({ ...item, value: item.value * 100 }))
+    .filter((item) => Number.isFinite(item.value)),
+);
+
+function normalizeSeries(items = [], field) {
+  return (items || [])
+    .map((point, index) => ({
+      time: toChartTime(point.timestamp || point.time || point.date, index),
+      value: Number(point[field] ?? 0),
+    }))
+    .filter((item) => item.time)
+    .sort((left, right) => Number(left.time) - Number(right.time));
 }
 
-function buildChartOptions() {
-  return {
-    responsive: true,
-    maintainAspectRatio: false,
-    interaction: {
-      intersect: false,
-      mode: "index",
-    },
-    plugins: {
-      legend: {
-        display: true,
-        position: "top",
-        labels: {
-          color: "#f1f5ff",
-          usePointStyle: true,
-          boxWidth: 8,
-        },
-      },
-      tooltip: {
-        callbacks: {
-          label(context) {
-            const value = Number(context.raw || 0);
-            if (context.datasetIndex === 1) {
-              return `回撤: ${value.toFixed(2)}%`;
-            }
-            return `权益: ${value.toLocaleString("zh-CN", { minimumFractionDigits: 2 })} USDT`;
-          },
-        },
-      },
-    },
-    scales: {
-      x: {
-        ticks: { color: "#9db0c6", maxTicksLimit: 8, font: { size: 10 } },
-        grid: { color: "rgba(154, 182, 214, 0.08)" },
-      },
-      y: {
-        type: "linear",
-        position: "left",
-        ticks: {
-          color: "#9db0c6",
-          callback(value) {
-            return Number(value).toLocaleString("zh-CN", { notation: "compact" });
-          },
-        },
-        grid: { color: "rgba(154, 182, 214, 0.10)" },
-      },
-      y1: {
-        type: "linear",
-        position: "right",
-        grid: { drawOnChartArea: false },
-        ticks: {
-          color: "#9db0c6",
-          callback(value) {
-            return `${Number(value).toFixed(1)}%`;
-          },
-        },
-      },
-    },
-  };
+function toChartTime(value, fallbackIndex) {
+  if (typeof value === "number") {
+    return value > 10_000_000_000 ? Math.floor(value / 1000) : Math.floor(value);
+  }
+  if (value) {
+    const parsed = Date.parse(String(value));
+    if (!Number.isNaN(parsed)) {
+      return Math.floor(parsed / 1000);
+    }
+  }
+  return Math.floor(Date.now() / 1000) + fallbackIndex;
+}
+
+function formatChartTime(time) {
+  const date = new Date(Number(time) * 1000);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${month}-${day} ${hours}:${minutes}`;
 }
 
 function renderChart() {
-  if (!canvasRef.value) {
-    return;
+  if (!chartEl.value) return;
+  if (!chart) {
+    chart = createChart(chartEl.value, {
+      height: props.height,
+      layout: { background: { color: "transparent" }, textColor: "#9db0c6" },
+      grid: {
+        vertLines: { color: "rgba(154, 176, 198, 0.08)" },
+        horzLines: { color: "rgba(154, 176, 198, 0.08)" },
+      },
+      rightPriceScale: { borderColor: "rgba(154, 176, 198, 0.16)" },
+      leftPriceScale: { visible: true, borderColor: "rgba(154, 176, 198, 0.16)" },
+      timeScale: {
+        borderColor: "rgba(154, 176, 198, 0.28)",
+        timeVisible: true,
+        secondsVisible: false,
+        tickMarkFormatter: formatChartTime,
+      },
+      localization: {
+        timeFormatter: formatChartTime,
+        priceFormatter: (price) => Number(price || 0).toLocaleString("zh-CN", { maximumFractionDigits: 2 }),
+      },
+      crosshair: { mode: 1 },
+    });
+    equitySeries = chart.addSeries(LineSeries, {
+      color: "#13d6d6",
+      lineWidth: 2,
+      priceScaleId: "right",
+      title: "权益 USDT",
+    });
+    drawdownSeries = chart.addSeries(LineSeries, {
+      color: "#ff6b6b",
+      lineWidth: 2,
+      priceScaleId: "left",
+      title: "回撤 %",
+    });
+    resizeObserver = new ResizeObserver(() => {
+      if (chart && chartEl.value) {
+        chart.applyOptions({ width: chartEl.value.clientWidth, height: props.height });
+      }
+    });
+    resizeObserver.observe(chartEl.value);
   }
 
-  if (chartInstance) {
-    chartInstance.destroy();
-    chartInstance = null;
+  equitySeries.setData(equityRows.value);
+  drawdownSeries.setData(drawdownRows.value);
+  if (hasData.value) {
+    chart.timeScale().fitContent();
   }
-
-  const hasData = Boolean(props.equityCurve?.length || props.drawdownCurve?.length);
-  if (!hasData) {
-    return;
-  }
-
-  chartInstance = new Chart(canvasRef.value, {
-    type: "line",
-    data: buildChartData(),
-    options: buildChartOptions(),
-  });
 }
 
-watch(() => [props.equityCurve, props.drawdownCurve], renderChart, { deep: true });
+watch(() => [props.equityCurve, props.drawdownCurve, props.height], () => nextTick(renderChart), { deep: true });
 
-onMounted(renderChart);
+onMounted(() => nextTick(renderChart));
 
 onUnmounted(() => {
-  if (chartInstance) {
-    chartInstance.destroy();
-    chartInstance = null;
-  }
+  if (resizeObserver) resizeObserver.disconnect();
+  if (chart) chart.remove();
+  resizeObserver = null;
+  chart = null;
+  equitySeries = null;
+  drawdownSeries = null;
 });
 </script>
 
 <template>
   <div class="chart-wrap" :style="{ height: `${height}px` }">
-    <canvas ref="canvasRef"></canvas>
-    <div v-if="!equityCurve.length && !drawdownCurve.length" class="chart-empty">
-      暂无回测数据
-    </div>
+    <div ref="chartEl" class="backtest-chart"></div>
+    <div v-if="!hasData" class="chart-empty">暂无回测数据</div>
   </div>
 </template>
 
@@ -156,6 +138,11 @@ onUnmounted(() => {
   position: relative;
   width: 100%;
   margin-top: 18px;
+}
+
+.backtest-chart {
+  width: 100%;
+  height: 100%;
 }
 
 .chart-empty {

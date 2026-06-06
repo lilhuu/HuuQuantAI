@@ -88,4 +88,31 @@ describe("view smoke tests", () => {
       wrapper.unmount();
     });
   }
+
+  it("renders AuditView as an independent audit page", async () => {
+    const component = (await viewModules.AuditView()).default;
+    const wrapper = shallowMount(component, { global: { plugins: [createPinia()] } });
+
+    expect(wrapper.text()).toContain("监控审计");
+    expect(wrapper.findComponent({ name: "RiskView" }).exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("renders DiagnosticsView as an independent diagnostics page", async () => {
+    const component = (await viewModules.DiagnosticsView()).default;
+    const wrapper = shallowMount(component, { global: { plugins: [createPinia()] } });
+
+    expect(wrapper.text()).toContain("策略诊断");
+    expect(wrapper.findComponent({ name: "StrategyView" }).exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("renders SettingsView as an independent settings page", async () => {
+    const component = (await viewModules.SettingsView()).default;
+    const wrapper = shallowMount(component, { global: { plugins: [createPinia()] } });
+
+    expect(wrapper.text()).toContain("系统设置");
+    expect(wrapper.findComponent({ name: "AccountView" }).exists()).toBe(false);
+    wrapper.unmount();
+  });
 });
