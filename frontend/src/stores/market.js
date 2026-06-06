@@ -4,7 +4,7 @@ import { defineStore } from "pinia";
 import { apiClient } from "../lib/api";
 import { createReconnectingSocket } from "../lib/reconnectingSocket";
 import { createCryptoSocket } from "../lib/ws";
-import { normalizeCryptoSymbol } from "./tradingUtils";
+import { normalizeCryptoSymbol } from "../lib/tradingUtils";
 
 /**
  * @typedef {Object} CryptoQuote

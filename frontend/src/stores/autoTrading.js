@@ -2,7 +2,7 @@ import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 
 import { apiClient, classifyApiError } from "../lib/api";
-import { normalizeCryptoSymbol } from "./tradingUtils";
+import { normalizeCryptoSymbol } from "../lib/tradingUtils";
 
 const DEFAULT_CONFIG = {
   enabled: false,

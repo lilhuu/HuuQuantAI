@@ -1,8 +1,8 @@
 <script setup>
 import { computed, reactive, ref } from "vue";
 
+import { normalizeCryptoSymbol } from "../lib/tradingUtils";
 import { useTradingStore } from "../stores/trading";
-import { normalizeCryptoSymbol } from "../stores/tradingUtils";
 
 const store = useTradingStore();
 const formMessage = ref("");

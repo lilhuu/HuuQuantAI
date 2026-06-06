@@ -9,7 +9,7 @@ import { useAiChatStore } from "../stores/aiChat";
 import { useAuthStore } from "../stores/auth";
 import { useAutoTradingStore } from "../stores/autoTrading";
 import { useTradingStore } from "../stores/trading";
-import { normalizeCryptoSymbol } from "../stores/tradingUtils";
+import { normalizeCryptoSymbol } from "../lib/tradingUtils";
 
 const aiChat = useAiChatStore();
 const authStore = useAuthStore();

@@ -2,9 +2,9 @@
 import { computed, ref } from "vue";
 
 import CryptoKlineChart from "../components/CryptoKlineChart.vue";
+import { normalizeCryptoSymbol } from "../lib/tradingUtils";
 import { useMarketStore } from "../stores/market";
 import { useTradingStore } from "../stores/trading";
-import { normalizeCryptoSymbol } from "../stores/tradingUtils";
 
 const tradingStore = useTradingStore();
 const marketStore = useMarketStore();

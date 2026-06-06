@@ -5,7 +5,7 @@ import { apiClient } from "../lib/api";
 import { useMarketStore } from "./market";
 import { useSystemStore } from "./system";
 import { useUiStore } from "./ui";
-import { formatCryptoSymbol, normalizeCryptoSymbol, toneFromSocketState } from "./tradingUtils";
+import { formatCryptoSymbol, normalizeCryptoSymbol, toneFromSocketState } from "../lib/tradingUtils";
 
 const PREFERENCE_SAVE_DELAY_MS = 250;
 

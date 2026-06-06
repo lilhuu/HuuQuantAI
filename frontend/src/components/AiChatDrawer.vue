@@ -3,7 +3,7 @@ import { computed, nextTick, ref, watch } from "vue";
 
 import { useAiChatStore } from "../stores/aiChat";
 import { useTradingStore } from "../stores/trading";
-import { normalizeCryptoSymbol } from "../stores/tradingUtils";
+import { normalizeCryptoSymbol } from "../lib/tradingUtils";
 
 const aiChat = useAiChatStore();
 const trading = useTradingStore();

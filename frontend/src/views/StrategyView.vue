@@ -3,8 +3,8 @@ import { computed, onMounted, reactive, ref } from "vue";
 
 import BacktestChart from "../components/BacktestChart.vue";
 import { apiClient } from "../lib/api";
+import { normalizeCryptoSymbol } from "../lib/tradingUtils";
 import { useTradingStore } from "../stores/trading";
-import { normalizeCryptoSymbol } from "../stores/tradingUtils";
 
 const store = useTradingStore();
 const loading = ref(false);

@@ -2,7 +2,7 @@ import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 
 import { apiClient, extractApiError } from "../lib/api";
-import { normalizeCryptoSymbol } from "./tradingUtils";
+import { normalizeCryptoSymbol } from "../lib/tradingUtils";
 
 export const useAiChatStore = defineStore("ai-chat", () => {
   const drawerOpen = ref(false);

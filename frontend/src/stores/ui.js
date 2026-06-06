@@ -8,7 +8,7 @@ import {
   formatCurrency,
   formatPercent,
   formatPrice,
-} from "./tradingUtils";
+} from "../lib/tradingUtils";
 
 const ORDER_EVENT_CLEAR_MS = 4200;
 const SYSTEM_EVENT_CLEAR_MS = 4200;

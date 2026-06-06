@@ -2,7 +2,7 @@ import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 
 import { apiClient } from "../lib/api";
-import { normalizeCryptoSymbol } from "./tradingUtils";
+import { normalizeCryptoSymbol } from "../lib/tradingUtils";
 import { useSystemStore } from "./system";
 
 export const useAiAdvisorStore = defineStore("ai-advisor", () => {
