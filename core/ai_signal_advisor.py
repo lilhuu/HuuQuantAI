@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -56,14 +57,83 @@ def safe_json(data: Any) -> str:
     return json.dumps(data, ensure_ascii=False, default=str, separators=(",", ":"))
 
 
+def parse_ai_response_payload(output_text: str, *, provider_label: str = "AI") -> dict[str, Any]:
+    """Parse provider output that may contain a raw JSON object or a fenced JSON block."""
+    text = str(output_text or "").strip()
+    if not text:
+        return fallback_hold_advice(reason=f"{provider_label} 返回为空，已按安全规则转为 HOLD。")
+
+    candidates = [text]
+    fenced = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.IGNORECASE | re.DOTALL)
+    candidates = fenced + candidates
+    object_text = _extract_first_json_object(text)
+    if object_text:
+        candidates.append(object_text)
+
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+
+    excerpt = text.replace("\n", " ")[:180]
+    return fallback_hold_advice(
+        reason=f"{provider_label} 没有返回可解析的 JSON 交易信号，已按安全规则转为 HOLD。原始摘要：{excerpt}"
+    )
+
+
+def fallback_hold_advice(*, symbol: str = "", reason: str = "AI 返回格式不完整，已按安全规则转为 HOLD。") -> dict[str, Any]:
+    return {
+        "symbol": symbol,
+        "action": "HOLD",
+        "confidence": 0.0,
+        "suggested_notional_usdt": 0.0,
+        "max_loss_usdt": 0.0,
+        "time_horizon": "",
+        "reason": reason,
+        "risk_notes": ["AI 输出未完全符合本地结构化格式，系统未生成可交易建议。"],
+        "invalid_if": ["重新分析前保持观望。"],
+    }
+
+
+def _extract_first_json_object(text: str) -> str:
+    start = text.find("{")
+    if start < 0:
+        return ""
+    depth = 0
+    in_string = False
+    escape = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    return ""
+
+
 @dataclass
 class AiAdvisorConfig:
     enabled: bool = False
-    provider: str = "openai"
-    model: str = "gpt-5.2"
-    fallback_model: str = "gpt-5-mini"
-    api_key_env: str = "OPENAI_API_KEY"
-    base_url: str = ""
+    provider: str = "deepseek"
+    model: str = "deepseek-v4-flash"
+    fallback_model: str = "deepseek-v4-flash"
+    api_key_env: str = "DEEPSEEK_API_KEY"
+    base_url: str = "https://api.deepseek.com"
     mode: str = "advisory"
     manual_confirm_required: bool = True
     auto_paper_order_enabled: bool = False
@@ -76,11 +146,11 @@ class AiAdvisorConfig:
         data = dict(payload or {})
         return cls(
             enabled=bool(data.get("enabled", False)),
-            provider=str(data.get("provider") or "openai").lower(),
-            model=str(data.get("model") or "gpt-5.2"),
-            fallback_model=str(data.get("fallback_model") or "gpt-5-mini"),
-            api_key_env=str(data.get("api_key_env") or "OPENAI_API_KEY"),
-            base_url=str(data.get("base_url") or ""),
+            provider=str(data.get("provider") or "deepseek").lower(),
+            model=str(data.get("model") or "deepseek-v4-flash"),
+            fallback_model=str(data.get("fallback_model") or "deepseek-v4-flash"),
+            api_key_env=str(data.get("api_key_env") or "DEEPSEEK_API_KEY"),
+            base_url=str(data.get("base_url") or "https://api.deepseek.com"),
             mode=str(data.get("mode") or "advisory"),
             manual_confirm_required=bool(data.get("manual_confirm_required", True)),
             auto_paper_order_enabled=bool(data.get("auto_paper_order_enabled", False)),
@@ -259,12 +329,16 @@ class AiSignalAdvisor:
         output_text = getattr(message, "content", "") if message else ""
         if not output_text:
             raise ValueError("DeepSeek response did not include message content")
-        return json.loads(output_text)
+        return parse_ai_response_payload(output_text, provider_label="DeepSeek")
 
     def _system_prompt(self) -> str:
         return (
             "You are an advisory-only crypto risk analyst for a local paper-trading system. "
-            "Return only valid JSON that matches the schema. Do not promise profits. "
+            "Return only one valid JSON object that matches the schema. Do not wrap it in Markdown. "
+            "Required keys: symbol, action, confidence, suggested_notional_usdt, max_loss_usdt, "
+            "time_horizon, reason, risk_notes, invalid_if. "
+            "Use action HOLD, confidence 0, and suggested_notional_usdt 0 when uncertain. "
+            "Do not promise profits. "
             "Never recommend leverage, short selling, mainnet trading, or bypassing risk checks. "
             "Prefer HOLD when the evidence is weak. Include concrete risk notes and invalidation conditions. "
             "The user must manually confirm any paper order; you cannot place orders."
@@ -473,27 +547,56 @@ class AiSignalStore:
 def validate_ai_advice(payload: dict[str, Any], expected_symbol: str = "") -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("AI response must be a JSON object")
-    missing = [key for key in AI_SIGNAL_SCHEMA["required"] if key not in payload]
-    if missing:
-        raise ValueError(f"AI response missing required fields: {', '.join(missing)}")
-    symbol = normalize_crypto_symbol(payload.get("symbol"))
+    expected = normalize_crypto_symbol(expected_symbol) if expected_symbol else ""
+    raw_symbol = str(payload.get("symbol") or "").strip()
+    symbol = normalize_crypto_symbol(raw_symbol or expected)
     expected = normalize_crypto_symbol(expected_symbol) if expected_symbol else symbol
     if expected and symbol != expected:
         raise ValueError(f"AI response symbol mismatch: {symbol} != {expected}")
+
     action = str(payload.get("action") or "").upper()
     if action not in {"BUY", "SELL", "HOLD"}:
-        raise ValueError("AI response action must be BUY, SELL, or HOLD")
-    confidence = max(0.0, min(float(payload.get("confidence", 0) or 0), 1.0))
+        action = "HOLD"
+
+    missing = [key for key in AI_SIGNAL_SCHEMA["required"] if key not in payload]
+    confidence = _safe_float(payload.get("confidence"), default=0.0, minimum=0.0, maximum=1.0)
+    suggested_notional = _safe_float(payload.get("suggested_notional_usdt"), default=0.0, minimum=0.0)
+    max_loss = _safe_float(payload.get("max_loss_usdt"), default=0.0, minimum=0.0)
     risk_notes = payload.get("risk_notes") if isinstance(payload.get("risk_notes"), list) else []
     invalid_if = payload.get("invalid_if") if isinstance(payload.get("invalid_if"), list) else []
+    reason = str(payload.get("reason") or "").strip()
+    if missing:
+        action = "HOLD"
+        confidence = 0.0
+        suggested_notional = 0.0
+        max_loss = 0.0
+        reason = (
+            f"AI 返回格式不完整，缺少字段：{', '.join(missing)}。"
+            "系统已按安全规则转为 HOLD，不会生成模拟订单。"
+        )
+        risk_notes = [*risk_notes, "AI 输出未完全符合本地结构化格式。"]
+        invalid_if = [*invalid_if, "重新分析并获得完整结构化建议前保持观望。"]
+
     return {
         "symbol": symbol,
         "action": action,
         "confidence": confidence,
-        "suggested_notional_usdt": max(0.0, float(payload.get("suggested_notional_usdt", 0) or 0)),
-        "max_loss_usdt": max(0.0, float(payload.get("max_loss_usdt", 0) or 0)),
+        "suggested_notional_usdt": suggested_notional,
+        "max_loss_usdt": max_loss,
         "time_horizon": str(payload.get("time_horizon") or ""),
-        "reason": str(payload.get("reason") or ""),
+        "reason": reason,
         "risk_notes": [str(item) for item in risk_notes],
         "invalid_if": [str(item) for item in invalid_if],
     }
+
+
+def _safe_float(value: Any, *, default: float = 0.0, minimum: float | None = None, maximum: float | None = None) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        number = default
+    if minimum is not None:
+        number = max(minimum, number)
+    if maximum is not None:
+        number = min(maximum, number)
+    return number

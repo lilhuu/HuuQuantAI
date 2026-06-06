@@ -80,17 +80,18 @@ Copy-Item config\config.example.yaml config\config.yaml
 - `BINANCE_TESTNET_API_KEY`
 - `BINANCE_TESTNET_API_SECRET`
 - `FRED_API_KEY`
-- `OPENAI_API_KEY`
+- `DEEPSEEK_API_KEY`
 
 AI 默认配置示例：
 
 ```yaml
 ai:
   enabled: false
-  provider: openai
-  model: gpt-5.2
-  fallback_model: gpt-5-mini
-  api_key_env: OPENAI_API_KEY
+  provider: deepseek
+  model: deepseek-v4-flash
+  fallback_model: deepseek-v4-flash
+  api_key_env: DEEPSEEK_API_KEY
+  base_url: https://api.deepseek.com
   mode: advisory
   manual_confirm_required: true
   auto_paper_order_enabled: false

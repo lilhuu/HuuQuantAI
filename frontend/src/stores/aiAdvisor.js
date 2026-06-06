@@ -1,7 +1,7 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 
-import { apiClient } from "../lib/api";
+import { apiClient, extractApiError } from "../lib/api";
 import { normalizeCryptoSymbol } from "../lib/tradingUtils";
 import { useSystemStore } from "./system";
 
@@ -28,7 +28,7 @@ export const useAiAdvisorStore = defineStore("ai-advisor", () => {
       await fetchSignals();
       return data;
     } catch (error) {
-      errorMessage.value = error?.response?.data?.message || error?.message || "AI 分析失败";
+      errorMessage.value = extractApiError(error) || "AI 分析失败";
       throw error;
     } finally {
       loading.value = false;
@@ -65,7 +65,7 @@ export const useAiAdvisorStore = defineStore("ai-advisor", () => {
       await Promise.all([fetchSignals(), useSystemStore().refreshOverview()]);
       return data;
     } catch (error) {
-      errorMessage.value = error?.response?.data?.message || error?.message || "生成模拟订单失败";
+      errorMessage.value = extractApiError(error) || "生成模拟订单失败";
       throw error;
     } finally {
       ordering.value = false;

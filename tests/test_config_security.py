@@ -27,9 +27,9 @@ crypto:
   exchange: binance
 ai:
   enabled: true
-  provider: openai
-  model: gpt-5.2
-  api_key_env: OPENAI_API_KEY
+  provider: deepseek
+  model: deepseek-v4-flash
+  api_key_env: DEEPSEEK_API_KEY
 risk:
   real_trading_enabled: false
 storage:
@@ -57,7 +57,7 @@ risk:
     config = load_config(str(runtime_config))
 
     assert config["ai"]["enabled"] is True
-    assert config["ai"]["model"] == "gpt-5.2"
+    assert config["ai"]["model"] == "deepseek-v4-flash"
 
 
 def test_load_config_keeps_user_override_when_merging_defaults(monkeypatch, tmp_path):
@@ -67,7 +67,7 @@ def test_load_config_keeps_user_override_when_merging_defaults(monkeypatch, tmp_
         """
 ai:
   enabled: true
-  model: gpt-5.2
+  model: deepseek-v4-flash
 risk:
   real_trading_enabled: false
 """,
@@ -93,4 +93,4 @@ risk:
     config = load_config(str(runtime_config))
 
     assert config["ai"]["enabled"] is False
-    assert config["ai"]["model"] == "gpt-5.2"
+    assert config["ai"]["model"] == "deepseek-v4-flash"

@@ -11,7 +11,7 @@ from api.error_codes import ApiError, ErrorCode
 from api.main import app
 from api.models.request import AiSignalAnalyzeRequest
 from api.services.crypto_service import CryptoService
-from core.ai_signal_advisor import AiSignalAdvisor
+from core.ai_signal_advisor import AiSignalAdvisor, validate_ai_advice
 from core.crypto_market_data_provider import CryptoMarketDataProvider
 
 
@@ -238,6 +238,74 @@ def test_deepseek_signal_provider_uses_chat_completions(monkeypatch):
     assert captured["base_url"] == "https://api.deepseek.com"
     assert captured["request"]["model"] == "deepseek-v4-flash"
     assert captured["request"]["response_format"] == {"type": "json_object"}
+
+
+def test_deepseek_signal_provider_accepts_markdown_json(monkeypatch):
+    captured = {}
+
+    class FakeChatCompletions:
+        def create(self, **kwargs):
+            captured["request"] = kwargs
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="""```json
+{
+  "symbol": "BTC/USDT",
+  "action": "HOLD",
+  "confidence": 0.55,
+  "suggested_notional_usdt": 0,
+  "max_loss_usdt": 0,
+  "time_horizon": "1h",
+  "reason": "No clean risk-adjusted setup.",
+  "risk_notes": ["Range remains choppy."],
+  "invalid_if": ["Trend improves with volume."]
+}
+```"""
+                        )
+                    )
+                ]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, *, api_key, base_url=None):
+            self.chat = SimpleNamespace(completions=FakeChatCompletions())
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-test-key")
+
+    advisor = AiSignalAdvisor(
+        {
+            "enabled": True,
+            "provider": "deepseek",
+            "model": "deepseek-v4-flash",
+            "fallback_model": "deepseek-v4-flash",
+            "api_key_env": "DEEPSEEK_API_KEY",
+        }
+    )
+
+    result = advisor.analyze({"symbol": "BTC/USDT"})
+
+    assert result["action"] == "HOLD"
+    assert result["reason"] == "No clean risk-adjusted setup."
+    assert captured["request"]["response_format"] == {"type": "json_object"}
+
+
+def test_ai_advice_missing_fields_becomes_safe_hold():
+    result = validate_ai_advice(
+        {
+            "confidence": 0.92,
+            "risk_notes": ["Model returned only partial content."],
+        },
+        expected_symbol="BTC/USDT",
+    )
+
+    assert result["symbol"] == "BTC/USDT"
+    assert result["action"] == "HOLD"
+    assert result["confidence"] == 0.0
+    assert result["suggested_notional_usdt"] == 0.0
+    assert "缺少字段" in result["reason"]
 
 
 def test_ai_signal_api_routes(monkeypatch, tmp_path):
