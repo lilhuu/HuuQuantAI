@@ -3,7 +3,7 @@ import { createPinia, setActivePinia } from "pinia";
 
 import { useAuthStore } from "../stores/auth";
 import { useAutoTradingStore } from "../stores/autoTrading";
-import { useTradingStore } from "../stores/trading";
+import { useWorkspaceStore } from "../stores/workspace";
 import { useBoot } from "./useBoot";
 import { useToast } from "./useToast";
 
@@ -24,12 +24,12 @@ describe("useBoot", () => {
 
   it("does not initialize workspace data when the user is not authenticated", async () => {
     const authStore = useAuthStore();
-    const tradingStore = useTradingStore();
+    const workspaceStore = useWorkspaceStore();
     const autoStore = useAutoTradingStore();
 
     vi.spyOn(authStore, "ensureInitialized").mockResolvedValue(undefined);
-    const loadPreferences = vi.spyOn(tradingStore, "loadUserPreferences").mockResolvedValue(null);
-    const bootstrap = vi.spyOn(tradingStore, "bootstrap").mockResolvedValue(undefined);
+    const loadPreferences = vi.spyOn(workspaceStore, "loadUserPreferences").mockResolvedValue(null);
+    const bootstrap = vi.spyOn(workspaceStore, "bootstrap").mockResolvedValue(undefined);
     const fetchStatus = vi.spyOn(autoStore, "fetchStatus").mockResolvedValue(null);
 
     const { initializeWorkbench } = useBoot();
@@ -43,7 +43,7 @@ describe("useBoot", () => {
 
   it("initializes preferences, workspace data, auto status, and realtime streams for authenticated users", async () => {
     const authStore = useAuthStore();
-    const tradingStore = useTradingStore();
+    const workspaceStore = useWorkspaceStore();
     const autoStore = useAutoTradingStore();
     const calls = [];
 
@@ -53,18 +53,18 @@ describe("useBoot", () => {
     vi.spyOn(authStore, "ensureInitialized").mockImplementation(async () => {
       calls.push("auth");
     });
-    vi.spyOn(tradingStore, "loadUserPreferences").mockImplementation(async () => {
+    vi.spyOn(workspaceStore, "loadUserPreferences").mockImplementation(async () => {
       calls.push("preferences");
       return null;
     });
-    vi.spyOn(tradingStore, "bootstrap").mockImplementation(async () => {
+    vi.spyOn(workspaceStore, "bootstrap").mockImplementation(async () => {
       calls.push("bootstrap");
     });
     vi.spyOn(autoStore, "fetchStatus").mockImplementation(async () => {
       calls.push("auto-status");
       return null;
     });
-    vi.spyOn(tradingStore, "connectRealtimeStreams").mockImplementation(() => {
+    vi.spyOn(workspaceStore, "connectRealtimeStreams").mockImplementation(() => {
       calls.push("sockets");
     });
 
@@ -81,9 +81,9 @@ describe("useBoot", () => {
   });
 
   it("disconnects realtime streams and resets state during teardown", () => {
-    const tradingStore = useTradingStore();
-    const disconnect = vi.spyOn(tradingStore, "disconnectRealtimeStreams").mockImplementation(() => {});
-    const reset = vi.spyOn(tradingStore, "resetState").mockImplementation(() => {});
+    const workspaceStore = useWorkspaceStore();
+    const disconnect = vi.spyOn(workspaceStore, "disconnectRealtimeStreams").mockImplementation(() => {});
+    const reset = vi.spyOn(workspaceStore, "resetState").mockImplementation(() => {});
 
     const { teardownWorkbench } = useBoot();
     teardownWorkbench({ reset: true });

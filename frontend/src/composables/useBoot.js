@@ -2,13 +2,13 @@ import { ref } from "vue";
 
 import { useAuthStore } from "../stores/auth";
 import { useAutoTradingStore } from "../stores/autoTrading";
-import { useTradingStore } from "../stores/trading";
+import { useWorkspaceStore } from "../stores/workspace";
 import { useToast } from "./useToast";
 
 export function useBoot() {
   const authStore = useAuthStore();
   const autoStore = useAutoTradingStore();
-  const tradingStore = useTradingStore();
+  const workspaceStore = useWorkspaceStore();
   const { setError } = useToast();
 
   const isBooting = ref(false);
@@ -28,9 +28,9 @@ export function useBoot() {
           return false;
         }
 
-        await tradingStore.loadUserPreferences();
-        await Promise.allSettled([tradingStore.bootstrap(), autoStore.fetchStatus()]);
-        tradingStore.connectRealtimeStreams();
+        await workspaceStore.loadUserPreferences();
+        await Promise.allSettled([workspaceStore.bootstrap(), autoStore.fetchStatus()]);
+        workspaceStore.connectRealtimeStreams();
         lastBootError.value = null;
         return true;
       } catch (error) {
@@ -47,9 +47,9 @@ export function useBoot() {
   }
 
   function teardownWorkbench({ reset = false } = {}) {
-    tradingStore.disconnectRealtimeStreams();
+    workspaceStore.disconnectRealtimeStreams();
     if (reset) {
-      tradingStore.resetState();
+      workspaceStore.resetState();
     }
   }
 

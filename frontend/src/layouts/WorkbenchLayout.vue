@@ -5,20 +5,29 @@ import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 import AiChatDrawer from "../components/AiChatDrawer.vue";
 import { useBoot } from "../composables/useBoot";
 import { useToast } from "../composables/useToast";
+import { useWorkspaceActions } from "../composables/useWorkspaceActions";
 import { useAiChatStore } from "../stores/aiChat";
 import { useAuthStore } from "../stores/auth";
-import { useAutoTradingStore } from "../stores/autoTrading";
-import { useTradingStore } from "../stores/trading";
-import { normalizeCryptoSymbol } from "../lib/tradingUtils";
 
 const aiChat = useAiChatStore();
 const authStore = useAuthStore();
-const autoStore = useAutoTradingStore();
-const store = useTradingStore();
 const route = useRoute();
 const router = useRouter();
 const { errorInfo: toastErrorInfo, setError: setToastError, clearError: clearToastError } = useToast();
 const { initializeWorkbench, teardownWorkbench } = useBoot();
+const {
+  autoStateLabel,
+  pairOptions,
+  selectedCryptoSymbol,
+  priceText,
+  changeText,
+  changeClass,
+  errorInfo: workspaceErrorInfo,
+  changeSymbol,
+  refreshWorkspace,
+  clearWorkspaceError,
+  primeAlertAudio,
+} = useWorkspaceActions();
 
 const navItems = [
   { label: "仪表盘", icon: "grid", to: "/" },
@@ -35,49 +44,7 @@ const navItems = [
   { label: "系统设置", icon: "settings", to: "/settings" },
 ];
 
-const pairOptions = computed(() => {
-  const base = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "DOGE/USDT", ...store.cryptoWatchSymbols];
-  return [...new Set(base.map((item) => normalizeCryptoSymbol(item)).filter(Boolean))];
-});
-
-const selectedQuote = computed(() => {
-  const symbol = normalizeCryptoSymbol(store.selectedCryptoSymbol);
-  return store.cryptoQuotes.find((item) => item.symbol === symbol) || null;
-});
-
-const priceText = computed(() => store.formatPrice(selectedQuote.value?.price || 0));
-const changeText = computed(() => store.formatPercent((selectedQuote.value?.change || 0) * 100));
-const changeClass = computed(() => (Number(selectedQuote.value?.change || 0) >= 0 ? "number-up" : "number-down"));
-const visibleErrorInfo = computed(() => toastErrorInfo.value || store.errorInfo);
-
-async function changeSymbol() {
-  const symbol = normalizeCryptoSymbol(store.selectedCryptoSymbol);
-  if (!symbol) {
-    return;
-  }
-  store.selectedCryptoSymbol = symbol;
-  if (!store.cryptoWatchSymbols.includes(symbol)) {
-    store.cryptoWatchSymbols = [...store.cryptoWatchSymbols, symbol];
-  }
-  await Promise.allSettled([
-    store.fetchCryptoQuotes(store.cryptoWatchSymbols),
-    store.fetchCryptoKlines({ symbol, period: store.selectedCryptoPeriod || "1h", limit: 200 }),
-  ]);
-  store.subscribeMarketSocket(store.cryptoWatchSymbols);
-}
-
-async function refreshWorkspace() {
-  await Promise.allSettled([
-    store.refreshOverview(),
-    autoStore.fetchStatus(),
-    store.fetchCryptoQuotes(store.cryptoWatchSymbols),
-    store.fetchCryptoKlines({
-      symbol: store.selectedCryptoSymbol,
-      period: store.selectedCryptoPeriod || "1h",
-      limit: 200,
-    }),
-  ]);
-}
+const visibleErrorInfo = computed(() => toastErrorInfo.value || workspaceErrorInfo.value);
 
 async function logout() {
   teardownWorkbench({ reset: true });
@@ -86,7 +53,7 @@ async function logout() {
 }
 
 function handleUserInteraction() {
-  store.primeAlertAudio();
+  primeAlertAudio();
 }
 
 onErrorCaptured((error, _instance, info) => {
@@ -121,7 +88,7 @@ watch(
 
 function clearVisibleError() {
   clearToastError();
-  store.clearError();
+  clearWorkspaceError();
 }
 </script>
 
@@ -163,7 +130,7 @@ function clearVisibleError() {
     <section class="cq-main">
       <header class="cq-topbar">
         <div class="cq-market-strip">
-          <select v-model="store.selectedCryptoSymbol" class="cq-pair-select" @change="changeSymbol">
+          <select v-model="selectedCryptoSymbol" class="cq-pair-select" @change="changeSymbol">
             <option v-for="symbol in pairOptions" :key="symbol" :value="symbol">{{ symbol }}</option>
           </select>
           <div class="cq-top-stat">
@@ -179,7 +146,7 @@ function clearVisibleError() {
         <div class="cq-top-actions">
           <div class="cq-mode-card">
             <span>自动交易</span>
-            <strong>{{ autoStore.stateLabel }}</strong>
+            <strong>{{ autoStateLabel }}</strong>
           </div>
           <div class="cq-mode-card">
             <span>账户模式</span>
