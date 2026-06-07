@@ -97,7 +97,7 @@ function clearVisibleError() {
     <aside class="cq-sidebar">
       <div class="cq-brand">
         <div class="cq-brand__mark" aria-hidden="true">
-          <span></span>
+          <img src="/assets/huuquant-bot.png" alt="" />
         </div>
         <div>
           <strong>HuuQuantAI</strong>
