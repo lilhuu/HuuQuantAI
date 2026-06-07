@@ -1125,3 +1125,605 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Product Design reference AI workbench */
+.cq-ai-workbench--reference {
+  min-height: calc(100vh - 100px);
+}
+
+.cq-ai-workbench--reference .cq-ai-cockpit-grid {
+  grid-template-columns: minmax(0, 1fr) 374px;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.cq-ai-main-grid {
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr) 246px;
+  grid-template-areas:
+    "chart chart market"
+    "signal flow flow"
+    "history history history";
+  gap: 10px;
+  min-width: 0;
+}
+
+.cq-ai-workbench--reference .cq-panel {
+  padding: 12px;
+  border-color: rgba(86, 96, 128, 0.16);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(14, 18, 27, 0.96), rgba(7, 10, 16, 0.96)),
+    #090c12;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+.cq-ai-workbench--reference .cq-panel h2 {
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.cq-ai-workbench--reference .cq-panel__heading {
+  align-items: center;
+  gap: 10px;
+}
+
+.cq-ai-workbench--reference .cq-panel__heading p {
+  margin-top: 4px;
+  color: #8f98ae;
+  font-size: 11px;
+}
+
+.cq-chart-command {
+  grid-area: chart;
+}
+
+.cq-ai-market-column {
+  grid-area: market;
+  display: grid;
+  gap: 10px;
+}
+
+.cq-ai-signal-card {
+  grid-area: signal;
+}
+
+.cq-risk-flow-card {
+  grid-area: flow;
+}
+
+.cq-ai-history {
+  grid-area: history;
+  margin-top: 0;
+}
+
+.cq-chart-heading {
+  min-height: 36px;
+}
+
+.cq-chart-tabs,
+.cq-history-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 8px;
+}
+
+.cq-chart-tabs button,
+.cq-history-tabs button {
+  min-height: 24px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 6px;
+  color: #8f98ae;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.cq-chart-tabs button.active,
+.cq-history-tabs button.active {
+  color: #fff;
+  background: linear-gradient(135deg, #6f5cff, #4635cb);
+}
+
+.cq-chart-tools {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.cq-mini-select {
+  height: 30px;
+  min-width: 104px;
+  padding: 0 8px;
+  border: 1px solid rgba(107, 116, 150, 0.2);
+  border-radius: 7px;
+  color: #eef2ff;
+  background: rgba(13, 17, 25, 0.95);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.cq-mini-select--short {
+  min-width: 64px;
+}
+
+.cq-chart-legend {
+  display: flex;
+  gap: 22px;
+  margin-top: 8px;
+  color: #9d79ff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.cq-chart-legend span:first-child {
+  color: #f5d46d;
+}
+
+.cq-chart-legend span:nth-child(2) {
+  color: #2bd6cf;
+}
+
+.cq-ai-workbench--reference .cq-copilot-chart {
+  position: relative;
+  min-height: 292px;
+  margin-top: 6px;
+  border-color: rgba(86, 96, 128, 0.15);
+  background: #101318;
+}
+
+.cq-chart-data-badge {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  z-index: 2;
+  padding: 5px 8px;
+  border: 1px solid rgba(245, 212, 109, 0.28);
+  border-radius: 999px;
+  color: #f5d46d;
+  background: rgba(15, 14, 8, 0.78);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.cq-ai-workbench--reference .cq-chart-empty-state {
+  min-height: 292px;
+}
+
+.cq-market-overview-card,
+.cq-market-mood-card {
+  min-height: 0;
+}
+
+.cq-market-list {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.cq-market-list button {
+  display: grid;
+  grid-template-columns: minmax(76px, 1fr) 74px 52px;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: #eef2ff;
+  background: transparent;
+  text-align: left;
+}
+
+.cq-market-list button.active {
+  border-color: rgba(111, 92, 255, 0.22);
+  background: rgba(111, 92, 255, 0.22);
+}
+
+.cq-market-list strong,
+.cq-market-list span,
+.cq-market-list em {
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.cq-market-list span {
+  color: #dce3f6;
+  text-align: right;
+}
+
+.cq-market-list em {
+  color: #23d698;
+  text-align: right;
+}
+
+.cq-market-mood-card h2 {
+  margin: 0;
+}
+
+.cq-gauge {
+  display: grid;
+  place-items: center;
+  width: 96px;
+  height: 56px;
+  margin: 14px auto 8px;
+  border-radius: 96px 96px 10px 10px;
+  background:
+    radial-gradient(circle at 50% 100%, #0b0f16 0 42%, transparent 43%),
+    conic-gradient(from 225deg, #23d698 calc(var(--score) * 0.75%), rgba(117, 126, 153, 0.3) 0 75%, transparent 0);
+}
+
+.cq-gauge strong {
+  margin-top: 11px;
+  color: #e8edf9;
+  font-size: 10px;
+}
+
+.cq-gauge span {
+  color: #23d698;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.cq-market-mood-card dl {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+}
+
+.cq-market-mood-card dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #8f98ae;
+  font-size: 11px;
+}
+
+.cq-market-mood-card dt,
+.cq-market-mood-card dd {
+  margin: 0;
+}
+
+.cq-market-mood-card dd {
+  color: #f5d46d;
+  font-weight: 800;
+}
+
+.cq-signal-detail {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.cq-signal-row {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  color: #aeb6c9;
+  font-size: 11px;
+}
+
+.cq-signal-row strong,
+.cq-signal-row p {
+  margin: 0;
+  color: #eef2ff;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.cq-signal-row--stacked {
+  align-items: start;
+}
+
+.cq-signal-row--stacked p {
+  color: #cbd3e7;
+  line-height: 1.55;
+  font-weight: 650;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.cq-signal-action {
+  color: #f5d46d !important;
+}
+
+.cq-confidence {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.cq-confidence i {
+  display: block;
+  height: 7px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #6bd6ff, #6f5cff);
+}
+
+.cq-tag-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.cq-tag-row span {
+  padding: 4px 9px;
+  border-radius: 999px;
+  color: #dbe1ff;
+  background: rgba(111, 92, 255, 0.24);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.cq-ai-workbench--reference .cq-decision-flow {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.cq-ai-workbench--reference .cq-decision-step {
+  min-height: 68px;
+  padding: 9px 7px;
+  text-align: center;
+}
+
+.cq-ai-workbench--reference .cq-decision-step span {
+  width: 23px;
+  height: 23px;
+  margin-bottom: 5px;
+  font-size: 10px;
+}
+
+.cq-ai-workbench--reference .cq-decision-step strong {
+  font-size: 10px;
+}
+
+.cq-ai-workbench--reference .cq-decision-step p {
+  margin-top: 5px;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.cq-account-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(86, 96, 128, 0.14);
+}
+
+.cq-account-strip div {
+  min-width: 0;
+}
+
+.cq-account-strip span {
+  display: block;
+  color: #8f98ae;
+  font-size: 10px;
+}
+
+.cq-account-strip strong {
+  display: block;
+  margin-top: 3px;
+  color: #eef2ff;
+  font-size: 13px;
+}
+
+.cq-risk-flow-card h3 {
+  margin: 12px 0 8px;
+  font-size: 13px;
+}
+
+.cq-ai-workbench--reference .cq-diagnostics-strip {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 0;
+}
+
+.cq-ai-workbench--reference .cq-diagnostic-card {
+  min-height: 58px;
+  padding: 7px;
+}
+
+.cq-ai-workbench--reference .cq-diagnostic-card span,
+.cq-ai-workbench--reference .cq-diagnostic-card small {
+  color: #8f98ae;
+  font-size: 10px;
+}
+
+.cq-ai-workbench--reference .cq-diagnostic-card strong {
+  margin-top: 5px;
+  font-size: 13px;
+}
+
+.cq-ai-workbench--reference .cq-table {
+  margin-top: 8px;
+}
+
+.cq-ai-workbench--reference .cq-table th,
+.cq-ai-workbench--reference .cq-table td {
+  padding: 6px 9px;
+  font-size: 11px;
+}
+
+.cq-table-eye {
+  min-height: 22px;
+  padding: 0 8px;
+  border: 1px solid rgba(111, 92, 255, 0.28);
+  border-radius: 999px;
+  color: #c8c3ff;
+  background: rgba(111, 92, 255, 0.12);
+  font-size: 10px;
+}
+
+.cq-ai-workbench--reference .cq-copilot-panel {
+  position: sticky;
+  top: 88px;
+  height: calc(100vh - 104px);
+  min-height: 0;
+  border-color: rgba(86, 96, 128, 0.16);
+}
+
+.cq-ai-workbench--reference .cq-copilot-panel__head {
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  padding: 15px 16px;
+}
+
+.cq-ai-workbench--reference .cq-copilot-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+}
+
+.cq-ai-workbench--reference .cq-copilot-avatar img {
+  width: 36px;
+  height: 36px;
+}
+
+.cq-ai-workbench--reference .cq-copilot-panel__head span {
+  color: #f2f4ff;
+  font-size: 15px;
+}
+
+.cq-ai-workbench--reference .cq-copilot-panel__head strong {
+  color: #8f98ae;
+  font-size: 11px;
+}
+
+.cq-copilot-window-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.cq-copilot-window-actions button {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  color: #8f98ae;
+  background: transparent;
+  font-size: 17px;
+}
+
+.cq-ai-workbench--reference .cq-copilot-messages {
+  gap: 12px;
+  padding: 16px;
+}
+
+.cq-ai-workbench--reference .cq-copilot-message {
+  max-width: 88%;
+  padding: 12px 13px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.cq-ai-workbench--reference .cq-copilot-message span {
+  font-size: 10px;
+}
+
+.cq-ai-workbench--reference .cq-copilot-message p {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.62;
+}
+
+.cq-ai-workbench--reference .cq-copilot-message--user {
+  max-width: 76%;
+  background: rgba(111, 92, 255, 0.28);
+}
+
+.cq-ai-workbench--reference .cq-copilot-composer {
+  gap: 9px;
+  padding: 12px;
+}
+
+.cq-ai-workbench--reference .cq-copilot-composer textarea {
+  min-height: 76px;
+  max-height: 120px;
+  font-size: 12px;
+}
+
+.cq-ai-workbench--reference .cq-copilot-actions span {
+  color: #697287;
+  font-size: 10px;
+}
+
+.cq-copilot-model-footer {
+  display: grid;
+  grid-template-columns: 1fr 172px;
+  gap: 8px 10px;
+  align-items: center;
+  padding-top: 8px;
+  border-top: 1px solid rgba(86, 96, 128, 0.14);
+}
+
+.cq-copilot-model-footer > div:first-child span {
+  display: block;
+  color: #8f98ae;
+  font-size: 10px;
+}
+
+.cq-copilot-model-footer > div:first-child strong {
+  display: block;
+  margin-top: 3px;
+  color: #dbe1ff;
+  font-size: 12px;
+}
+
+.cq-copilot-model-footer small {
+  grid-column: 1 / -1;
+  color: #7f879d;
+  font-size: 10px;
+}
+
+.cq-ai-workbench--reference .cq-muted-button {
+  justify-content: center;
+  flex-direction: column;
+  min-height: 46px;
+  border-radius: 8px;
+  color: #d9def0;
+  font-size: 12px;
+}
+
+.cq-ai-workbench--reference .cq-muted-button small {
+  display: block;
+  margin-top: 3px;
+  color: #8f98ae;
+  font-size: 10px;
+}
+
+@media (max-width: 1320px) {
+  .cq-ai-workbench--reference .cq-ai-cockpit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cq-ai-workbench--reference .cq-copilot-panel {
+    position: static;
+    height: 680px;
+  }
+}
+
+@media (max-width: 980px) {
+  .cq-ai-main-grid {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "chart"
+      "market"
+      "signal"
+      "flow"
+      "history";
+  }
+
+  .cq-account-strip,
+  .cq-ai-workbench--reference .cq-diagnostics-strip,
+  .cq-ai-workbench--reference .cq-decision-flow {
+    grid-template-columns: 1fr;
+  }
+}

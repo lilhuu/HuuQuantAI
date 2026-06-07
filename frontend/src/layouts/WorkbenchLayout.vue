@@ -8,15 +8,16 @@ import { useToast } from "../composables/useToast";
 import { useWorkspaceActions } from "../composables/useWorkspaceActions";
 import { useAiChatStore } from "../stores/aiChat";
 import { useAuthStore } from "../stores/auth";
+import { useMarketStore } from "../stores/market";
 
 const aiChat = useAiChatStore();
 const authStore = useAuthStore();
+const marketStore = useMarketStore();
 const route = useRoute();
 const router = useRouter();
 const { errorInfo: toastErrorInfo, setError: setToastError, clearError: clearToastError } = useToast();
 const { initializeWorkbench, teardownWorkbench } = useBoot();
 const {
-  autoStateLabel,
   pairOptions,
   selectedCryptoSymbol,
   priceText,
@@ -31,20 +32,29 @@ const {
 
 const navItems = [
   { label: "仪表盘", icon: "grid", to: "/" },
-  { label: "市场分析", icon: "trend", to: "/market" },
+  { label: "市场行情", icon: "trend", to: "/market" },
   { label: "手动交易", icon: "clock", to: "/trade" },
   { label: "自动交易", icon: "target", to: "/auto" },
-  { label: "AI 信号", icon: "target", to: "/ai" },
-  { label: "账户状态", icon: "wallet", to: "/account" },
-  { label: "组合分析", icon: "wallet", to: "/portfolio" },
-  { label: "策略验证", icon: "flask", to: "/strategy" },
-  { label: "执行可靠性", icon: "shield", to: "/risk" },
-  { label: "监控审计", icon: "audit", to: "/audit" },
-  { label: "策略诊断", icon: "target", to: "/diagnostics" },
+  { label: "AI 助手", icon: "target", to: "/ai" },
+  { label: "策略中心", icon: "flask", to: "/strategy" },
+  { label: "回测中心", icon: "audit", to: "/portfolio" },
+  { label: "投资组合", icon: "wallet", to: "/account" },
+  { label: "风控中心", icon: "shield", to: "/risk" },
+  { label: "审计日志", icon: "audit", to: "/audit" },
+  { label: "诊断中心", icon: "target", to: "/diagnostics" },
   { label: "系统设置", icon: "settings", to: "/settings" },
 ];
 
 const visibleErrorInfo = computed(() => toastErrorInfo.value || workspaceErrorInfo.value);
+const selectedQuote = computed(
+  () => marketStore.cryptoQuotes.find((item) => item.symbol === selectedCryptoSymbol.value) || null,
+);
+const periodText = computed(() => marketStore.selectedCryptoPeriod || "1h");
+const highText = computed(() => formatTopPrice(selectedQuote.value?.high || selectedQuote.value?.high24h || 0));
+const lowText = computed(() => formatTopPrice(selectedQuote.value?.low || selectedQuote.value?.low24h || 0));
+const volumeText = computed(() =>
+  formatTopVolume(selectedQuote.value?.volume || selectedQuote.value?.quote_volume || selectedQuote.value?.baseVolume || 0),
+);
 
 async function logout() {
   teardownWorkbench({ reset: true });
@@ -90,6 +100,20 @@ function clearVisibleError() {
   clearToastError();
   clearWorkspaceError();
 }
+
+function formatTopPrice(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number) || number <= 0) return "--";
+  return number >= 100 ? number.toLocaleString("en-US", { maximumFractionDigits: 2 }) : number.toFixed(5);
+}
+
+function formatTopVolume(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number) || number <= 0) return "--";
+  if (number >= 1_000_000) return `${(number / 1_000_000).toFixed(2)}M`;
+  if (number >= 1_000) return `${(number / 1_000).toFixed(2)}K`;
+  return number.toFixed(2);
+}
 </script>
 
 <template>
@@ -101,11 +125,11 @@ function clearVisibleError() {
         </div>
         <div>
           <strong>HuuQuantAI</strong>
-          <span>量化控制台</span>
+          <span>量化交易控制台</span>
         </div>
       </div>
 
-      <nav class="cq-nav" aria-label="主功能表">
+      <nav class="cq-nav" aria-label="主功能栏">
         <RouterLink
           v-for="item in navItems"
           :key="`${item.label}-${item.to}`"
@@ -119,46 +143,77 @@ function clearVisibleError() {
       </nav>
 
       <div class="cq-sidebar-card">
-        <strong>系统状态</strong>
-        <button class="cq-outline-button cq-legacy-button" @click="refreshWorkspace">
-          <span class="cq-lock-icon" aria-hidden="true"></span>
-          刷新工作台
-        </button>
+        <div class="cq-sidebar-status-row">
+          <span>系统状态</span>
+          <strong>正常运行</strong>
+        </div>
+        <div class="cq-sidebar-status-row">
+          <span>行情连接</span>
+          <strong>已连接</strong>
+        </div>
+        <div class="cq-sidebar-status-row">
+          <span>交易引擎</span>
+          <strong>模拟模式</strong>
+        </div>
+        <small>v1.3.0</small>
       </div>
     </aside>
 
     <section class="cq-main">
       <header class="cq-topbar">
         <div class="cq-market-strip">
+          <button class="cq-menu-button" type="button" title="折叠菜单">☰</button>
           <select v-model="selectedCryptoSymbol" class="cq-pair-select" @change="changeSymbol">
             <option v-for="symbol in pairOptions" :key="symbol" :value="symbol">{{ symbol }}</option>
           </select>
+          <span class="cq-favorite-star" aria-hidden="true">★</span>
           <div class="cq-top-stat">
-            <span>当前价格</span>
+            <span>最新价</span>
             <strong>{{ priceText }}</strong>
           </div>
           <div class="cq-top-stat cq-top-stat--green">
-            <span>24H</span>
+            <span>24h涨跌</span>
             <strong :class="changeClass">{{ changeText }}</strong>
+          </div>
+          <div class="cq-top-stat">
+            <span>24h最高</span>
+            <strong>{{ highText }}</strong>
+          </div>
+          <div class="cq-top-stat">
+            <span>24h最低</span>
+            <strong>{{ lowText }}</strong>
+          </div>
+          <div class="cq-top-stat cq-top-stat--volume">
+            <span>24h成交量</span>
+            <strong>{{ volumeText }}</strong>
+          </div>
+          <div class="cq-period-pill">
+            <strong>{{ periodText }}</strong>
+            <span>⌄</span>
           </div>
         </div>
 
         <div class="cq-top-actions">
-          <div class="cq-mode-card">
-            <span>自动交易</span>
-            <strong>{{ autoStateLabel }}</strong>
+          <div class="cq-model-toggle" aria-label="模型">
+            <span>模型</span>
+            <div>
+              <button class="active" type="button">Flash</button>
+              <button type="button">Pro</button>
+            </div>
           </div>
           <div class="cq-mode-card">
             <span>账户模式</span>
             <strong>Binance 模拟</strong>
           </div>
           <div class="cq-mode-card">
-            <span>当前用户</span>
-            <strong>{{ authStore.user?.username || "admin" }}</strong>
+            <span>真实交易</span>
+            <strong class="number-down">已关闭</strong>
           </div>
-          <button class="cq-accent-button" title="打开 AI 对话助手" @click="aiChat.openDrawer()">AI 对话</button>
-          <button class="cq-icon-button" title="刷新" @click="refreshWorkspace">刷</button>
-          <button class="cq-outline-button" @click="logout">退出</button>
+          <button class="cq-icon-button cq-user-button" :title="authStore.user?.username || 'admin'" @click="aiChat.openDrawer()">
+            <span aria-hidden="true">●</span>
+          </button>
+          <button class="cq-icon-button" title="刷新" @click="refreshWorkspace">↻</button>
+          <button class="cq-outline-button cq-logout-button" @click="logout">退出</button>
         </div>
       </header>
 

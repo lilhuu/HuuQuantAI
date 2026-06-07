@@ -1097,3 +1097,281 @@ body,
     padding: 20px;
   }
 }
+
+/* Product Design reference shell: compact trading terminal */
+.cq-shell {
+  grid-template-columns: 184px minmax(0, 1fr);
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 18% 16%, rgba(33, 224, 192, 0.06), transparent 22%),
+    linear-gradient(180deg, rgba(111, 92, 255, 0.05), transparent 24%),
+    #05070b;
+}
+
+.cq-sidebar {
+  gap: 16px;
+  padding: 20px 14px 14px;
+  border-right-color: rgba(107, 116, 150, 0.16);
+  background: linear-gradient(180deg, rgba(8, 11, 18, 0.98), rgba(4, 6, 10, 0.99));
+}
+
+.cq-brand {
+  gap: 10px;
+  padding: 0 6px 12px;
+}
+
+.cq-brand__mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+}
+
+.cq-brand__mark img {
+  width: 40px;
+  height: 40px;
+}
+
+.cq-brand strong {
+  font-size: 15px;
+}
+
+.cq-brand span {
+  font-size: 11px;
+}
+
+.cq-nav {
+  gap: 6px;
+  padding-right: 5px;
+  margin-right: -5px;
+}
+
+.cq-nav__item {
+  min-height: 34px;
+  gap: 10px;
+  padding: 0 11px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cq-nav__item:hover,
+.cq-nav__item.active {
+  color: #f5f6ff;
+  background: linear-gradient(90deg, rgba(111, 92, 255, 0.48), rgba(111, 92, 255, 0.14));
+}
+
+.cq-icon {
+  flex-basis: 17px;
+  width: 17px;
+  height: 17px;
+}
+
+.cq-sidebar-card {
+  gap: 10px;
+  padding: 12px;
+  border-color: rgba(107, 116, 150, 0.14);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(16, 21, 31, 0.94), rgba(10, 13, 19, 0.94));
+}
+
+.cq-sidebar-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #9aa3b8;
+  font-size: 11px;
+}
+
+.cq-sidebar-status-row strong {
+  color: #23d698;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.cq-sidebar-card small {
+  margin-top: 6px;
+  color: #8b93a8;
+  font-size: 10px;
+}
+
+.cq-topbar {
+  min-height: 76px;
+  padding: 11px 16px;
+  gap: 14px;
+  border-bottom-color: rgba(107, 116, 150, 0.14);
+  background: rgba(5, 7, 11, 0.92);
+}
+
+.cq-market-strip,
+.cq-top-actions {
+  gap: 10px;
+  flex-wrap: nowrap;
+}
+
+.cq-menu-button,
+.cq-period-pill,
+.cq-model-toggle,
+.cq-favorite-star {
+  border: 1px solid rgba(107, 116, 150, 0.2);
+  border-radius: 10px;
+  background: rgba(17, 20, 29, 0.88);
+  color: #eef2ff;
+}
+
+.cq-menu-button {
+  width: 38px;
+  height: 38px;
+  font-size: 17px;
+}
+
+.cq-pair-select {
+  min-width: 126px;
+  min-height: 38px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.cq-favorite-star {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  color: #f5d46d;
+  background: transparent;
+  font-size: 14px;
+}
+
+.cq-top-stat,
+.cq-mode-card {
+  min-width: 72px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.cq-top-stat span,
+.cq-mode-card span,
+.cq-model-toggle > span {
+  color: #8f98ae;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.cq-top-stat strong,
+.cq-mode-card strong {
+  margin-top: 3px;
+  font-size: 12px;
+}
+
+.cq-top-stat:first-of-type strong {
+  color: #23d698;
+  font-size: 16px;
+}
+
+.cq-top-stat--green {
+  border: 0;
+  background: transparent;
+}
+
+.cq-top-stat--volume {
+  min-width: 92px;
+}
+
+.cq-period-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+}
+
+.cq-period-pill strong {
+  font-size: 13px;
+}
+
+.cq-model-toggle {
+  display: grid;
+  gap: 5px;
+  min-width: 132px;
+  border: 0;
+  background: transparent;
+}
+
+.cq-model-toggle div {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  overflow: hidden;
+  min-height: 30px;
+  border: 1px solid rgba(107, 116, 150, 0.18);
+  border-radius: 999px;
+  background: rgba(18, 23, 34, 0.94);
+}
+
+.cq-model-toggle button {
+  border: 0;
+  color: #b7bed0;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.cq-model-toggle button.active {
+  color: #fff;
+  background: linear-gradient(135deg, #6f5cff, #4635cb);
+}
+
+.cq-mode-card {
+  min-width: 102px;
+  padding: 0 2px;
+}
+
+.cq-icon-button {
+  min-width: 34px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  font-size: 12px;
+}
+
+.cq-user-button {
+  background: rgba(31, 39, 55, 0.95);
+}
+
+.cq-user-button span {
+  display: block;
+  color: #9aa3b8;
+  font-size: 12px;
+}
+
+.cq-outline-button.cq-logout-button {
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 9px;
+  font-size: 12px;
+}
+
+.cq-content {
+  padding: 10px 14px 8px;
+}
+
+.cq-error {
+  margin: 12px 14px 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+}
+
+@media (max-width: 1180px) {
+  .cq-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .cq-market-strip,
+  .cq-top-actions {
+    flex-wrap: wrap;
+  }
+}
