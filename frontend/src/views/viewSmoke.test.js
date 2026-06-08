@@ -5,6 +5,7 @@ import { shallowMount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 
 import { apiClient } from "../lib/api";
+import FeatureCommandView from "../components/FeatureCommandView.vue";
 
 vi.mock("vue-router", async () => {
   const actual = await vi.importActual("vue-router");
@@ -52,16 +53,22 @@ describe("view smoke tests", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.stubGlobal("localStorage", createStorageStub());
-    vi.stubGlobal("ResizeObserver", class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    });
-    vi.stubGlobal("IntersectionObserver", class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    });
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
     mockApiClient();
     setActivePinia(createPinia());
   });
@@ -93,7 +100,7 @@ describe("view smoke tests", () => {
     const component = (await viewModules.AuditView()).default;
     const wrapper = shallowMount(component, { global: { plugins: [createPinia()] } });
 
-    expect(wrapper.text()).toContain("监控审计");
+    expect(wrapper.findComponent(FeatureCommandView).props("feature")).toBe("audit");
     expect(wrapper.findComponent({ name: "RiskView" }).exists()).toBe(false);
     wrapper.unmount();
   });
@@ -102,7 +109,7 @@ describe("view smoke tests", () => {
     const component = (await viewModules.DiagnosticsView()).default;
     const wrapper = shallowMount(component, { global: { plugins: [createPinia()] } });
 
-    expect(wrapper.text()).toContain("策略诊断");
+    expect(wrapper.findComponent(FeatureCommandView).props("feature")).toBe("diagnostics");
     expect(wrapper.findComponent({ name: "StrategyView" }).exists()).toBe(false);
     wrapper.unmount();
   });
@@ -111,7 +118,7 @@ describe("view smoke tests", () => {
     const component = (await viewModules.SettingsView()).default;
     const wrapper = shallowMount(component, { global: { plugins: [createPinia()] } });
 
-    expect(wrapper.text()).toContain("系统设置");
+    expect(wrapper.findComponent(FeatureCommandView).props("feature")).toBe("settings");
     expect(wrapper.findComponent({ name: "AccountView" }).exists()).toBe(false);
     wrapper.unmount();
   });

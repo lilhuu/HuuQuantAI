@@ -36,7 +36,7 @@ const router = createRouter({
           path: "",
           name: "dashboard",
           component: DashboardView,
-          meta: { title: "总览大屏", requiresAuth: true },
+          meta: { title: "仪表盘", requiresAuth: true },
         },
         {
           path: "account",
@@ -48,13 +48,13 @@ const router = createRouter({
           path: "portfolio",
           name: "portfolio",
           component: PortfolioView,
-          meta: { title: "组合分析", requiresAuth: true },
+          meta: { title: "投资组合", requiresAuth: true },
         },
         {
           path: "market",
           name: "market",
           component: MarketView,
-          meta: { title: "实时行情", requiresAuth: true },
+          meta: { title: "市场行情", requiresAuth: true },
         },
         {
           path: "trade",
@@ -78,7 +78,7 @@ const router = createRouter({
           path: "strategy",
           name: "strategy",
           component: StrategyView,
-          meta: { title: "策略管理", requiresAuth: true },
+          meta: { title: "策略中心", requiresAuth: true },
         },
         {
           path: "risk",
@@ -90,13 +90,13 @@ const router = createRouter({
           path: "audit",
           name: "audit",
           component: AuditView,
-          meta: { title: "监控审计", requiresAuth: true },
+          meta: { title: "审计日志", requiresAuth: true },
         },
         {
           path: "diagnostics",
           name: "diagnostics",
           component: DiagnosticsView,
-          meta: { title: "策略诊断", requiresAuth: true },
+          meta: { title: "诊断中心", requiresAuth: true },
         },
         {
           path: "settings",

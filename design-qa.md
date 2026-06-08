@@ -2,24 +2,27 @@
 - No P0/P1/P2 findings remain.
 
 **Comparison Result**
-- The `/ai` workbench now matches the selected reference direction: compact left navigation, top trading status strip, DOGE/USDT focus, K-line card, market overview/sentiment column, local risk approval flow, AI signal panel, history table, and fixed right-side AI copilot.
-- Final rendered viewport: `1440 x 1024`.
-- Final page metrics: `scrollWidth=1440`, `scrollHeight=1024`, `hasOverflowX=false`.
-- K-line canvas rendered successfully: `chartCanvas=true`.
+- The selected option 1 direction, "AI command matrix", is now applied across the main feature blocks through a shared `FeatureCommandView`.
+- Dashboard, market, manual trade, auto trade, strategy, portfolio, account, risk, audit, diagnostics, and settings now present the same closed loop: market context -> AI recommendation -> local risk approval -> paper execution -> review ledger.
+- The existing `/ai` page remains the detailed AI copilot workbench and continues to match the prior reference direction.
+- Final rendered viewport for the shared matrix QA: `1486 x 900`.
+- The captured dashboard showed: compact sidebar, top trading status strip, AI strategy card, local risk approval pipeline, simulated trading ledger, module capability cards, recent events, and right-side AI copilot panel.
 
 **Implementation Notes**
-- Updated `frontend/src/layouts/WorkbenchLayout.vue` to match the reference shell density and restore touched Chinese labels.
-- Updated `frontend/src/views/AiAdvisorView.vue` into a reference-style AI copilot workbench with DOGE/USDT default focus, Flash/Pro selector, market column, AI decision flow, diagnostics, and chat examples.
-- Updated `frontend/src/styles/layout.css` and `frontend/src/styles/views.css` for the tighter high-tech terminal layout.
-- Added a clearly labelled K-line preview fallback when the public行情源 is unavailable, so visual structure stays intact without pretending it is live execution data.
+- Added `frontend/src/components/FeatureCommandView.vue` as the reusable app-wide command matrix surface.
+- Converted the functional view entrypoints to route into the matrix with feature-specific copy and actions.
+- Cleaned `frontend/src/router/index.js` route meta titles back to readable Chinese.
+- Updated `frontend/src/styles/views.css` with the dense dark matrix layout, purple AI emphasis, cyan primary actions, and green approval states.
+- Kept true trading disabled and labelled the flow as PaperBroker / simulated execution.
 
 **Evidence**
-- Source visual: `C:\Users\Administrator\.codex\generated_images\019dd837-2fd1-70a1-a745-4b992298b37c\ig_048c97cb16e66f56016a24c16a5a808191b398b9d0f50167e9.png`
-- Implementation screenshot: `D:\auto_trader\design-ai-workbench-screenshot.png`
-- Captured route/state: authenticated local QA session, `/ai`, 1440 x 1024 Edge render.
+- Selected design direction: option 1, AI command matrix.
+- Prior AI workbench reference screenshot: `D:\auto_trader\design-ai-workbench-screenshot.png`.
+- Current implementation screenshot: `D:\auto_trader\design-qa-feature-matrix.png`.
+- Captured route/state: authenticated local QA session, `/`, 1486 x 900 Edge headless render.
 
 **Follow-Up Polish**
-- P3: Replace remaining CSS-drawn/glyph icons with a proper icon library in a later icon-system pass.
-- P3: Apply the same dense cockpit visual language to dashboard, market, trade, and settings pages.
+- P3: Continue replacing the remaining glyph-like navigation icons with a proper icon system in a later pass.
+- P3: If desired, migrate each feature page's deeper operational forms into the matrix cards instead of keeping them as shared high-level command surfaces.
 
 final result: passed
