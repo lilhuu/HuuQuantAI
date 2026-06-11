@@ -8,6 +8,7 @@ const AiAdvisorView = () => import("../views/AiAdvisorView.vue");
 const AuditView = () => import("../views/AuditView.vue");
 const AutoTradingView = () => import("../views/AutoTradingView.vue");
 const AuthView = () => import("../views/AuthView.vue");
+const BacktestView = () => import("../views/BacktestView.vue");
 const DashboardView = () => import("../views/DashboardView.vue");
 const DiagnosticsView = () => import("../views/DiagnosticsView.vue");
 const MarketView = () => import("../views/MarketView.vue");
@@ -79,6 +80,12 @@ const router = createRouter({
           name: "strategy",
           component: StrategyView,
           meta: { title: "策略验证", requiresAuth: true },
+        },
+        {
+          path: "backtest",
+          name: "backtest",
+          component: BacktestView,
+          meta: { title: "回测中心", requiresAuth: true },
         },
         {
           path: "risk",

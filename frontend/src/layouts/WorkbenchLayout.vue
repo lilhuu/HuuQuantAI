@@ -37,6 +37,7 @@ const navItems = [
   { label: "自动交易", icon: "target", to: "/auto" },
   { label: "AI 助手", icon: "target", to: "/ai" },
   { label: "策略验证", icon: "flask", to: "/strategy" },
+  { label: "回测中心", icon: "audit", to: "/backtest" },
   { label: "投资组合", icon: "wallet", to: "/portfolio" },
   { label: "账户状态", icon: "wallet", to: "/account" },
   { label: "执行可靠性", icon: "shield", to: "/risk" },

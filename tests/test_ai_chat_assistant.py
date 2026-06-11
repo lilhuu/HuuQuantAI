@@ -413,6 +413,91 @@ def test_ai_chat_risk_guide_mode_selects_risk_block_explanation(tmp_path):
     assert context["active_operation_guide"]["safety_notice"]
 
 
+def test_ai_chat_context_builds_safe_action_cards_and_workspace_state(tmp_path):
+    service = _service(tmp_path)
+    service.ai_chat_assistant.chat = MagicMock(return_value={"model": "gpt-5.2", "content": "打开策略中心并查看回测。"})
+
+    _run(
+        service.chat_ai_assistant(
+            AiChatRequest(
+                message="跑一次策略回测",
+                symbol="BTC/USDT",
+                include_context=False,
+                current_route="/strategy",
+                current_module="strategy",
+                guide_mode=True,
+                user_goal="跑一次策略回测",
+                visible_context={
+                    "api_key": "DEEPSEEK_SECRET_SHOULD_NOT_LEAK",
+                    "token": "TOKEN_SHOULD_NOT_LEAK",
+                    "public_state": "strategy-page",
+                },
+            )
+        )
+    )
+
+    context = service.ai_chat_assistant.chat.call_args.kwargs["context_summary"]
+    cards = context["action_cards"]
+    assert cards
+    assert {card["action_type"] for card in cards} <= {"navigate", "inspect", "explain"}
+    assert {"place_order", "cancel_order", "enable_real_trading", "change_config", "call_trade_api"}.isdisjoint(
+        {card["action_type"] for card in cards}
+    )
+    assert any(card["target_route"] == "/backtest" for card in cards)
+    assert context["workspace_state"]["current_route"] == "/strategy"
+    assert context["workspace_state"]["real_trading_status"] == "disabled"
+    assert context["decision_chain_summary"]["stages"] == [
+        "market_data",
+        "strategy_signal",
+        "confidence",
+        "macro_gate",
+        "risk_approval",
+        "cash_position",
+        "paper_order",
+    ]
+    serialized = str(context)
+    assert "DEEPSEEK_SECRET_SHOULD_NOT_LEAK" not in serialized
+    assert "TOKEN_SHOULD_NOT_LEAK" not in serialized
+    assert "[redacted]" in serialized
+
+
+def test_ai_chat_auto_and_risk_routes_return_relevant_action_cards(tmp_path):
+    service = _service(tmp_path)
+    service.ai_chat_assistant.chat = MagicMock(return_value={"model": "gpt-5.2", "content": "检查风控和审计。"})
+
+    _run(
+        service.chat_ai_assistant(
+            AiChatRequest(
+                message="为什么没下单",
+                symbol="BTC/USDT",
+                include_context=False,
+                current_route="/auto",
+                guide_mode=True,
+                user_goal="排查为什么没下单",
+            )
+        )
+    )
+    auto_context = service.ai_chat_assistant.chat.call_args.kwargs["context_summary"]
+    assert {card["target_route"] for card in auto_context["action_cards"]} >= {"/auto", "/risk", "/audit"}
+    assert auto_context["risk_block_summary"]["real_trading_enabled"] is False
+
+    _run(
+        service.chat_ai_assistant(
+            AiChatRequest(
+                message="风控阻断是什么意思",
+                symbol="BTC/USDT",
+                include_context=False,
+                current_route="/risk",
+                guide_mode=True,
+                user_goal="查看风控阻断原因",
+            )
+        )
+    )
+    risk_context = service.ai_chat_assistant.chat.call_args.kwargs["context_summary"]
+    assert {card["target_route"] for card in risk_context["action_cards"]} >= {"/risk", "/audit"}
+    assert risk_context["module_usage_guide"]["id"] == "risk"
+
+
 def test_ai_chat_api_routes(tmp_path):
     service = _service(tmp_path)
     service.ai_chat_assistant.chat = MagicMock(return_value={"model": "gpt-5.2", "content": "模拟研究建议。"})

@@ -11,6 +11,7 @@ import { useAiChatStore } from "../stores/aiChat";
 
 const routeState = vi.hoisted(() => ({
   current: { path: "/", name: "dashboard", query: {}, meta: { title: "仪表盘" } },
+  routerPush: vi.fn(),
 }));
 
 vi.mock("vue-router", async () => {
@@ -18,7 +19,7 @@ vi.mock("vue-router", async () => {
   return {
     ...actual,
     useRoute: () => routeState.current,
-    useRouter: () => ({ push: vi.fn() }),
+    useRouter: () => ({ push: routeState.routerPush }),
   };
 });
 
@@ -28,6 +29,7 @@ const viewModules = {
   AuditView: () => import("./AuditView.vue"),
   AutoTradingView: () => import("./AutoTradingView.vue"),
   AuthView: () => import("./AuthView.vue"),
+  BacktestView: () => import("./BacktestView.vue"),
   DashboardView: () => import("./DashboardView.vue"),
   DiagnosticsView: () => import("./DiagnosticsView.vue"),
   MarketView: () => import("./MarketView.vue"),
@@ -76,6 +78,7 @@ describe("view smoke tests", () => {
       },
     );
     mockApiClient();
+    routeState.routerPush.mockClear();
     routeState.current = { path: "/", name: "dashboard", query: {}, meta: { title: "仪表盘" } };
     setActivePinia(createPinia());
   });
@@ -187,5 +190,75 @@ describe("view smoke tests", () => {
     expect(wrapper.text()).toContain("引导模式");
     expect(wrapper.text()).toContain("跑一次策略回测");
     wrapper.unmount();
+  });
+
+  it("renders safe AI action cards and navigates without trading calls", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const aiChat = useAiChatStore();
+    aiChat.drawerOpen = true;
+    aiChat.messages = [
+      {
+        message_id: "A1",
+        role: "assistant",
+        content: "可以先打开风控中心查看阻断原因。",
+        context_summary: {
+          action_cards: [
+            {
+              id: "risk-card",
+              title: "查看风控阻断",
+              description: "打开风控中心，只读检查阻断原因。",
+              action_type: "navigate",
+              target_route: "/risk",
+              risk_level: "safe",
+            },
+            {
+              id: "explain-card",
+              title: "解释当前页面",
+              description: "把问题填入输入框，不执行操作。",
+              action_type: "explain",
+              target_route: "",
+              risk_level: "safe",
+            },
+          ],
+        },
+      },
+    ];
+
+    const wrapper = shallowMount(AiChatDrawer, {
+      global: {
+        plugins: [pinia],
+        stubs: { Teleport: true },
+      },
+    });
+
+    expect(wrapper.text()).toContain("查看风控阻断");
+    await wrapper.find('[data-action-card-id="risk-card"]').trigger("click");
+    expect(routeState.routerPush).toHaveBeenCalledWith("/risk");
+    expect(apiClient.post).not.toHaveBeenCalledWith(expect.stringContaining("orders"), expect.anything());
+
+    await wrapper.find('[data-action-card-id="explain-card"]').trigger("click");
+    expect(wrapper.find("textarea").element.value).toContain("解释当前页面");
+    wrapper.unmount();
+  });
+
+  it("marks feature pages with differentiated AI workspace regions", () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const market = shallowMount(FeatureCommandView, {
+      props: { feature: "market" },
+      global: { plugins: [pinia], stubs: { CryptoKlineChart: true, BacktestChart: true } },
+    });
+    expect(market.find('[data-feature-role="market-intelligence"]').exists()).toBe(true);
+    expect(market.find(".cq-feature-copilot").exists()).toBe(true);
+    market.unmount();
+
+    const strategy = shallowMount(FeatureCommandView, {
+      props: { feature: "strategy" },
+      global: { plugins: [pinia], stubs: { CryptoKlineChart: true, BacktestChart: true } },
+    });
+    expect(strategy.find('[data-feature-role="strategy-lab"]').exists()).toBe(true);
+    expect(strategy.find('[data-feature-role="market-intelligence"]').exists()).toBe(false);
+    strategy.unmount();
   });
 });

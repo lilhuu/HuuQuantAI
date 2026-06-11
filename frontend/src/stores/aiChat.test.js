@@ -140,4 +140,37 @@ describe("aiChat store", () => {
       }),
     );
   });
+
+  it("keeps safe action cards from the latest assistant context", async () => {
+    vi.spyOn(apiClient, "post").mockResolvedValueOnce({
+      data: {
+        session: { session_id: "AICHAT_5", title: "cards", message_count: 2 },
+        user_message: { message_id: "U5", role: "user", content: "show me risk" },
+        assistant_message: { message_id: "A5", role: "assistant", content: "Open risk center." },
+        context_summary: {
+          action_cards: [
+            {
+              id: "risk_block_explanation",
+              title: "查看风控阻断",
+              description: "打开风控中心查看阻断原因",
+              action_type: "navigate",
+              target_route: "/risk",
+              risk_level: "safe",
+            },
+          ],
+        },
+      },
+    });
+    vi.spyOn(apiClient, "get").mockResolvedValueOnce({ data: { items: [], total: 0 } });
+
+    const store = useAiChatStore();
+    await store.sendMessage({ message: "show me risk", symbol: "BTC/USDT" });
+
+    expect(store.latestActionCards).toHaveLength(1);
+    expect(store.latestActionCards[0]).toMatchObject({
+      action_type: "navigate",
+      target_route: "/risk",
+    });
+    expect(store.messages.at(-1).context_summary.action_cards).toHaveLength(1);
+  });
 });

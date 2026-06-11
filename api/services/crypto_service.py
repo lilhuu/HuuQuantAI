@@ -1252,6 +1252,31 @@ class CryptoService:
             quote=quote,
             macro=macro,
         )
+        workspace_state = dict(summary.get("workspace_state", {}))
+        workspace_state.update(
+            {
+                "latest_price": quote.get("price", 0),
+                "quote_source": quote.get("source", ""),
+                "account_cash": account.get("cash"),
+                "account_equity": account.get("equity") or account.get("total_equity"),
+                "positions_count": len(positions or []),
+                "recent_orders_count": len(recent_orders or []),
+                "auto_trading_state": self.auto_trading_engine.state,
+                "auto_loop_running": bool(self.auto_trading_engine.loop_running),
+            }
+        )
+        summary["workspace_state"] = workspace_state
+        summary["risk_block_summary"] = {
+            **(summary.get("risk_block_summary", {}) or {}),
+            "max_order_notional": self.auto_trading_engine.config.max_order_notional,
+            "max_positions": self.auto_trading_engine.config.max_positions,
+            "real_trading_enabled": False,
+            "recent_rejections": [
+                item
+                for item in (recent_orders or [])[:5]
+                if str(item.get("status", "")).lower() in {"rejected", "cancelled"}
+            ],
+        }
         summary["advisory_only"] = True
         summary["paper_order_allowed_by_ai"] = False
         summary["testnet_order_allowed_by_ai"] = False

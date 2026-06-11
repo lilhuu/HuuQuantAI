@@ -15,6 +15,15 @@ export const useAiChatStore = defineStore("ai-chat", () => {
   const messages = ref([]);
 
   const hasMessages = computed(() => messages.value.length > 0);
+  const latestActionCards = computed(() => {
+    for (const message of [...messages.value].reverse()) {
+      const cards = message?.context_summary?.action_cards;
+      if (Array.isArray(cards) && cards.length) {
+        return cards;
+      }
+    }
+    return [];
+  });
 
   function openDrawer() {
     drawerOpen.value = true;
@@ -57,7 +66,13 @@ export const useAiChatStore = defineStore("ai-chat", () => {
         include_context: payload.include_context !== false,
       });
       currentSession.value = data.session;
-      messages.value = [...messages.value, data.user_message, data.assistant_message].filter(Boolean);
+      const assistantMessage = data.assistant_message
+        ? {
+            ...data.assistant_message,
+            context_summary: data.assistant_message.context_summary || data.context_summary || {},
+          }
+        : null;
+      messages.value = [...messages.value, data.user_message, assistantMessage].filter(Boolean);
       await fetchSessions();
       return data;
     } catch (error) {
@@ -123,6 +138,7 @@ export const useAiChatStore = defineStore("ai-chat", () => {
     currentSession,
     messages,
     hasMessages,
+    latestActionCards,
     openDrawer,
     closeDrawer,
     startNewSession,

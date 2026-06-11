@@ -433,7 +433,7 @@ onMounted(async () => {
       </article>
     </div>
 
-    <div v-if="feature === 'dashboard'" class="cq-distinct-grid cq-distinct-grid--dashboard">
+    <div v-if="feature === 'dashboard'" class="cq-distinct-grid cq-distinct-grid--dashboard" data-feature-role="ai-command-dashboard">
       <article class="cq-feature-panel cq-span-2">
         <div class="cq-panel-headline">
           <div>
@@ -492,7 +492,7 @@ onMounted(async () => {
       </article>
     </div>
 
-    <div v-else-if="feature === 'market'" class="cq-distinct-grid cq-distinct-grid--market">
+    <div v-else-if="feature === 'market'" class="cq-distinct-grid cq-distinct-grid--market" data-feature-role="market-intelligence">
       <article class="cq-feature-panel cq-span-2">
         <div class="cq-panel-headline">
           <div>
@@ -559,7 +559,7 @@ onMounted(async () => {
       </article>
     </div>
 
-    <div v-else-if="feature === 'trade'" class="cq-distinct-grid cq-distinct-grid--trade">
+    <div v-else-if="feature === 'trade'" class="cq-distinct-grid cq-distinct-grid--trade" data-feature-role="paper-execution">
       <article class="cq-feature-panel">
         <div class="cq-panel-headline">
           <div>
@@ -614,7 +614,7 @@ onMounted(async () => {
       </article>
     </div>
 
-    <div v-else-if="feature === 'auto'" class="cq-distinct-grid cq-distinct-grid--auto">
+    <div v-else-if="feature === 'auto'" class="cq-distinct-grid cq-distinct-grid--auto" data-feature-role="auto-decision-pipeline">
       <article class="cq-feature-panel">
         <div class="cq-panel-headline"><div><span>自动交易配置</span><h2>扫描控制台</h2></div><b>{{ autoStore.stateLabel }}</b></div>
         <div class="cq-form-stack">
@@ -659,7 +659,7 @@ onMounted(async () => {
       </article>
     </div>
 
-    <div v-else-if="feature === 'strategy'" class="cq-distinct-grid cq-distinct-grid--strategy">
+    <div v-else-if="feature === 'strategy'" class="cq-distinct-grid cq-distinct-grid--strategy" data-feature-role="strategy-lab">
       <article class="cq-feature-panel">
         <div class="cq-panel-headline"><div><span>策略实验室</span><h2>运行参数</h2></div></div>
         <div class="cq-form-stack">
@@ -705,7 +705,7 @@ onMounted(async () => {
       </article>
     </div>
 
-    <div v-else-if="feature === 'portfolio'" class="cq-distinct-grid cq-distinct-grid--portfolio">
+    <div v-else-if="feature === 'portfolio'" class="cq-distinct-grid cq-distinct-grid--portfolio" data-feature-role="portfolio-intelligence">
       <article class="cq-feature-panel cq-span-3">
         <div class="cq-panel-headline">
           <div><span>资金曲线</span><h2>组合收益</h2></div>
@@ -736,7 +736,7 @@ onMounted(async () => {
       </article>
     </div>
 
-    <div v-else-if="feature === 'account'" class="cq-distinct-grid cq-distinct-grid--account">
+    <div v-else-if="feature === 'account'" class="cq-distinct-grid cq-distinct-grid--account" data-feature-role="paper-account">
       <article class="cq-feature-panel cq-span-3">
         <div class="cq-panel-headline"><div><span>模拟账户</span><h2>资金曲线</h2></div><b>{{ latestEquity?.timestamp || "暂无" }}</b></div>
         <BacktestChart :equity-curve="equityForChart" :drawdown-curve="drawdownForChart" :height="300" />
@@ -761,7 +761,7 @@ onMounted(async () => {
       </article>
     </div>
 
-    <div v-else-if="feature === 'risk'" class="cq-distinct-grid cq-distinct-grid--risk">
+    <div v-else-if="feature === 'risk'" class="cq-distinct-grid cq-distinct-grid--risk" data-feature-role="risk-approval">
       <article class="cq-feature-panel cq-span-3">
         <div class="cq-panel-headline"><div><span>审批规则</span><h2>本地风控闸门</h2></div><b>{{ riskState }}</b></div>
         <div class="cq-command-steps">
@@ -786,7 +786,7 @@ onMounted(async () => {
       </article>
     </div>
 
-    <div v-else-if="feature === 'audit'" class="cq-distinct-grid cq-distinct-grid--audit">
+    <div v-else-if="feature === 'audit'" class="cq-distinct-grid cq-distinct-grid--audit" data-feature-role="audit-trail">
       <article class="cq-feature-panel cq-span-3">
         <div class="cq-panel-headline"><div><span>订单生命周期</span><h2>审计账本</h2></div><b>{{ orders.length }} 条</b></div>
         <div class="cq-table-shell">
@@ -812,7 +812,7 @@ onMounted(async () => {
       </article>
     </div>
 
-    <div v-else-if="feature === 'diagnostics'" class="cq-distinct-grid cq-distinct-grid--diagnostics">
+    <div v-else-if="feature === 'diagnostics'" class="cq-distinct-grid cq-distinct-grid--diagnostics" data-feature-role="diagnostics-radar">
       <article class="cq-feature-panel cq-span-3">
         <div class="cq-panel-headline"><div><span>健康雷达</span><h2>系统诊断</h2></div></div>
         <div class="cq-health-grid">
@@ -841,7 +841,7 @@ onMounted(async () => {
       </article>
     </div>
 
-    <div v-else-if="feature === 'settings'" class="cq-distinct-grid cq-distinct-grid--settings">
+    <div v-else-if="feature === 'settings'" class="cq-distinct-grid cq-distinct-grid--settings" data-feature-role="safety-settings">
       <article class="cq-feature-panel">
         <div class="cq-panel-headline"><div><span>AI 模型</span><h2>DeepSeek V4</h2></div></div>
         <div class="cq-feature-model-switch cq-feature-model-switch--inline">

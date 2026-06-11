@@ -229,6 +229,18 @@ FORBIDDEN_AI_ACTIONS = [
     "call_trade_api",
 ]
 
+DECISION_CHAIN_STAGES = [
+    "market_data",
+    "strategy_signal",
+    "confidence",
+    "macro_gate",
+    "risk_approval",
+    "cash_position",
+    "paper_order",
+]
+
+SAFE_ACTION_TYPES = {"navigate", "inspect", "explain"}
+
 OPERATION_GUIDES: list[dict[str, Any]] = [
     {
         "id": "system_overview",
@@ -447,6 +459,19 @@ class ProjectAssistantContextBuilder:
         operation_guides = ProjectAssistantContextBuilder.guides_for_module(
             str((active_module or {}).get("id") or active_guide.get("module") or "")
         )
+        action_cards = ProjectAssistantContextBuilder.build_action_cards(
+            active_module=active_module,
+            active_guide=active_guide,
+        )
+        workspace_state = ProjectAssistantContextBuilder.build_workspace_state(
+            symbol=symbol,
+            period=period,
+            include_market_context=include_market_context,
+            current_route=current_route,
+            active_module=active_module,
+            current_view_title=current_view_title,
+        )
+        risk_block_summary = ProjectAssistantContextBuilder.build_risk_block_summary()
         route_questions = (
             ROUTE_SUGGESTED_QUESTIONS.get(str(active_module.get("id") or ""), [])
             if active_module
@@ -511,6 +536,15 @@ class ProjectAssistantContextBuilder:
             "guide_mode": bool(guide_mode),
             "operation_guides": operation_guides,
             "active_operation_guide": active_guide if guide_mode else {},
+            "action_cards": action_cards,
+            "workspace_state": workspace_state,
+            "decision_chain_summary": {
+                "stages": DECISION_CHAIN_STAGES,
+                "current_focus": str(active_guide.get("id") or (active_module.get("id") if active_module else "")),
+                "explain_order": "market data -> strategy signal -> confidence -> macro gate -> risk approval -> cash/position -> paper order",
+            },
+            "risk_block_summary": risk_block_summary,
+            "module_usage_guide": active_module or {},
             "allowed_user_actions": ALLOWED_USER_ACTIONS,
             "forbidden_ai_actions": FORBIDDEN_AI_ACTIONS,
             "route_suggested_questions": route_questions,
@@ -581,6 +615,122 @@ class ProjectAssistantContextBuilder:
         if best and score(best) > 0:
             return dict(best)
         return dict(candidates[0]) if candidates else {}
+
+    @staticmethod
+    def build_action_cards(
+        *,
+        active_module: dict[str, Any] | None = None,
+        active_guide: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        module_id = str((active_module or {}).get("id") or (active_guide or {}).get("module") or "dashboard")
+        guide_id = str((active_guide or {}).get("id") or "")
+        route_by_module = {
+            "dashboard": "/",
+            "market": "/market",
+            "manual_trade": "/trade",
+            "auto_trade": "/auto",
+            "ai_assistant": "/ai",
+            "strategy": "/strategy",
+            "backtest": "/backtest",
+            "portfolio": "/portfolio",
+            "account": "/account",
+            "risk": "/risk",
+            "audit": "/audit",
+            "diagnostics": "/diagnostics",
+            "settings": "/settings",
+        }
+        cards_by_guide = {
+            "strategy_backtest": [
+                ("open-backtest", "打开回测中心", "查看策略回测参数、收益曲线和回撤。", "navigate", "/backtest"),
+                ("inspect-strategy", "查看策略信号", "回到策略中心检查信号、置信度和冲突结果。", "navigate", "/strategy"),
+                ("inspect-risk", "检查风控审批", "确认回测后的候选信号是否会被风控阻断。", "navigate", "/risk"),
+            ],
+            "auto_no_order_diagnostics": [
+                ("inspect-auto", "查看自动交易", "检查扫描状态、策略信号和最近决策流水。", "navigate", "/auto"),
+                ("inspect-risk", "查看风控阻断", "打开风控中心，只读检查阻断原因。", "navigate", "/risk"),
+                ("inspect-audit", "进入审计日志", "追踪 AI 建议、风控审批和模拟订单生命周期。", "navigate", "/audit"),
+            ],
+            "risk_block_explanation": [
+                ("inspect-risk", "查看风控阻断", "打开风控中心，只读检查阻断原因。", "navigate", "/risk"),
+                ("inspect-audit", "进入审计日志", "对照审计记录定位拒单或阻断来源。", "navigate", "/audit"),
+                ("explain-risk", "解释当前风控", "把当前阻断信息填入输入框，让 AI 解释含义。", "explain", ""),
+            ],
+            "market_kline_analysis": [
+                ("inspect-market", "打开市场行情", "查看 K 线、盘口和交易对行情。", "navigate", "/market"),
+                ("ask-ai-market", "解释行情风险", "让 AI 说明当前趋势、成交量和风险点。", "explain", ""),
+            ],
+            "manual_paper_order": [
+                ("open-trade", "打开手动交易", "进入模拟交易表单，由用户手动确认。", "navigate", "/trade"),
+                ("inspect-risk", "提交前看风控", "检查现金、持仓和单笔金额限制。", "navigate", "/risk"),
+            ],
+            "portfolio_risk_review": [
+                ("open-portfolio", "查看投资组合", "检查资金曲线、持仓集中度和收益归因。", "navigate", "/portfolio"),
+                ("inspect-account", "核对模拟账户", "对照现金、持仓和订单状态。", "navigate", "/account"),
+            ],
+            "diagnostics_health_check": [
+                ("open-diagnostics", "打开诊断中心", "检查行情、AI、策略和缓存健康状态。", "navigate", "/diagnostics"),
+                ("open-settings", "检查系统设置", "确认模型和真实交易关闭状态。", "navigate", "/settings"),
+            ],
+            "settings_safety_check": [
+                ("open-settings", "打开系统设置", "查看 DeepSeek 模型和安全配置。", "navigate", "/settings"),
+                ("explain-safety", "解释安全边界", "让 AI 说明真实交易关闭和模拟盘限制。", "explain", ""),
+            ],
+        }
+        raw_cards = cards_by_guide.get(
+            guide_id,
+            [
+                ("inspect-current", "查看当前页面", "回到当前模块检查关键状态。", "navigate", route_by_module.get(module_id, "/")),
+                ("inspect-risk", "查看风控中心", "确认真实交易关闭和本地风控状态。", "navigate", "/risk"),
+                ("ask-ai-guide", "让 AI 分步解释", "把当前目标填入输入框，只生成操作说明。", "explain", ""),
+            ],
+        )
+        cards: list[dict[str, Any]] = []
+        for card_id, title, description, action_type, target_route in raw_cards:
+            if action_type not in SAFE_ACTION_TYPES:
+                continue
+            cards.append(
+                {
+                    "id": card_id,
+                    "title": title,
+                    "description": description,
+                    "action_type": action_type,
+                    "target_route": target_route,
+                    "risk_level": "safe",
+                }
+            )
+        return cards
+
+    @staticmethod
+    def build_workspace_state(
+        *,
+        symbol: str,
+        period: str,
+        include_market_context: bool,
+        current_route: str | None,
+        active_module: dict[str, Any],
+        current_view_title: str | None,
+    ) -> dict[str, Any]:
+        return {
+            "symbol": symbol,
+            "period": period,
+            "current_route": current_route or "",
+            "current_module": active_module.get("id") if active_module else "",
+            "current_view_title": current_view_title or active_module.get("name", "") if active_module else current_view_title or "",
+            "market_context_enabled": bool(include_market_context),
+            "trading_mode": "paper_trading",
+            "real_trading_status": "disabled",
+            "ai_permission": "advisory_only",
+        }
+
+    @staticmethod
+    def build_risk_block_summary() -> dict[str, Any]:
+        return {
+            "real_trading_enabled": False,
+            "paper_order_allowed_by_ai": False,
+            "testnet_order_allowed_by_ai": False,
+            "forbidden_ai_actions": FORBIDDEN_AI_ACTIONS,
+            "risk_first_order": ["risk_approval", "cash_position", "manual_confirm"],
+        }
 
     @staticmethod
     def sanitize_visible_context(value: Any, *, depth: int = 0) -> Any:

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, ref, watch } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 
 import { normalizeCryptoSymbol } from "../lib/tradingUtils";
 import { useAiAdvisorStore } from "../stores/aiAdvisor";
@@ -11,6 +11,7 @@ import { useSystemStore } from "../stores/system";
 import { useTradingStore } from "../stores/trading";
 
 const route = useRoute();
+const router = useRouter();
 const aiAdvisor = useAiAdvisorStore();
 const aiChat = useAiChatStore();
 const autoTrading = useAutoTradingStore();
@@ -114,6 +115,7 @@ const suggestedQuestions = computed(() => {
 const guideActions = computed(
   () => routeGuideOverrides[currentModule.value] || routeGuideMap[currentModule.value] || ["查看系统状态", "排查为什么没下单", "跑一次策略回测"],
 );
+const visibleActionCards = computed(() => aiChat.latestActionCards || []);
 const visibleContext = computed(() => ({
   route: currentRoutePath.value,
   module: currentModule.value,
@@ -165,6 +167,23 @@ function useGuideAction(action) {
   guideMode.value = true;
   selectedGuideGoal.value = String(action || "").trim();
   draft.value = selectedGuideGoal.value;
+}
+
+function handleActionCard(card) {
+  const actionType = String(card?.action_type || "");
+  if (actionType === "navigate" && card?.target_route) {
+    router.push(String(card.target_route));
+    return;
+  }
+  if (actionType === "inspect" && card?.target_route) {
+    router.push(String(card.target_route));
+    return;
+  }
+  if (actionType === "explain" || actionType === "inspect") {
+    guideMode.value = true;
+    selectedGuideGoal.value = String(card?.title || "解释当前页面");
+    draft.value = `${selectedGuideGoal.value}：${String(card?.description || "请结合当前页面状态说明。")}`;
+  }
 }
 
 async function send() {
@@ -324,6 +343,20 @@ watch(
                 <span>AI</span>
                 <p>正在结合当前页面、项目模块、行情、账户和风控状态思考...</p>
               </article>
+              <div v-if="visibleActionCards.length" class="ai-chat-action-cards" aria-label="AI 安全动作卡片">
+                <button
+                  v-for="card in visibleActionCards"
+                  :key="card.id || card.title"
+                  type="button"
+                  class="ai-chat-action-card"
+                  :data-action-card-id="card.id"
+                  @click="handleActionCard(card)"
+                >
+                  <strong>{{ card.title }}</strong>
+                  <span>{{ card.description }}</span>
+                  <small>{{ card.action_type }} · {{ card.risk_level || "safe" }}</small>
+                </button>
+              </div>
             </div>
 
             <p v-if="aiChat.errorMessage" class="ai-chat-error">{{ aiChat.errorMessage }}</p>
