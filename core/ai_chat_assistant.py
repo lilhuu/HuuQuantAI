@@ -15,15 +15,236 @@ from core.sqlite_utils import configure_sqlite_connection
 
 
 CHAT_SYSTEM_PROMPT = (
-    "You are HuuQuantAI's advisory-only crypto quant assistant. "
-    "Answer in Chinese unless the user asks otherwise. Use the supplied market, K-line, account, "
-    "position, order, and risk context when relevant. Do not promise profits. Do not recommend "
-    "leverage, short selling, mainnet trading, or bypassing risk checks. You cannot place orders, "
-    "cannot call paper/testnet/mainnet trading endpoints, and cannot change trading configuration. "
-    "If the user asks you to trade, explain the risk and tell them to use the manual simulated "
-    "trading controls themselves. Keep answers concise, practical, and clearly marked as research "
-    "or simulated-trading advice."
+    "You are HuuQuantAI's project copilot, product guide, and advisory-only crypto quant assistant. "
+    "Answer in Chinese unless the user asks otherwise. You can have normal conversations, explain how "
+    "the HuuQuantAI app works, guide the user through modules and workflows, and answer crypto quant, "
+    "strategy, risk, backtest, portfolio, paper-trading, and operations questions. Use the supplied "
+    "project module knowledge, workspace state, market, K-line, account, position, order, and risk "
+    "context when relevant. Do not promise profits. Do not recommend leverage, short selling, mainnet "
+    "trading, or bypassing risk checks. You cannot place orders, cannot call paper/testnet/mainnet "
+    "trading endpoints, and cannot change trading configuration. If the user asks you to trade, explain "
+    "the risk and tell them to use the manual simulated trading controls themselves. Keep answers concise, "
+    "practical, and clearly marked as research, product guidance, or simulated-trading advice."
 )
+
+
+PROJECT_MODULES: list[dict[str, Any]] = [
+    {
+        "id": "dashboard",
+        "name": "仪表盘",
+        "route": "/",
+        "purpose": "总览行情、AI 建议、风控审批、模拟订单和账户状态。",
+        "key_actions": ["刷新总览", "查看 AI 建议", "检查风险步骤", "查看最近订单"],
+        "common_questions": ["现在系统整体是否正常？", "当前最重要的风险是什么？"],
+        "closed_loop_role": "把市场、AI、风控和模拟交易串成一个总控视角。",
+    },
+    {
+        "id": "market",
+        "name": "市场行情",
+        "route": "/market",
+        "purpose": "查看交易对行情、K 线、盘口深度和量价状态。",
+        "key_actions": ["选择交易对", "切换周期", "加载 K 线", "查看盘口和报价列表"],
+        "common_questions": ["这段行情趋势是否健康？", "成交量有没有确认突破？"],
+        "closed_loop_role": "为 AI、策略和风控提供市场上下文。",
+    },
+    {
+        "id": "manual_trade",
+        "name": "手动交易",
+        "route": "/trade",
+        "purpose": "手动创建模拟订单，查看订单状态和模拟账户影响。",
+        "key_actions": ["填写交易对", "选择 BUY/SELL", "输入小数数量", "提交模拟订单"],
+        "common_questions": ["这笔模拟单会不会超出限额？", "卖出会不会超过持仓？"],
+        "closed_loop_role": "承接人工确认后的 PaperBroker 模拟执行。",
+    },
+    {
+        "id": "auto_trade",
+        "name": "自动交易",
+        "route": "/auto",
+        "purpose": "配置策略扫描、交易对、周期、仓位限制和自动模拟执行开关。",
+        "key_actions": ["保存扫描配置", "立即扫描", "启动或暂停自动循环", "查看决策记录"],
+        "common_questions": ["为什么自动交易没有下单？", "哪一步被风控挡住了？"],
+        "closed_loop_role": "把策略信号送入宏观门控、风控审批和模拟执行。",
+    },
+    {
+        "id": "ai_assistant",
+        "name": "AI 助手",
+        "route": "/ai",
+        "purpose": "进行结构化 AI 分析和自然语言项目问答。",
+        "key_actions": ["选择模型", "触发 AI 分析", "查看建议理由", "手动确认生成模拟订单"],
+        "common_questions": ["AI 为什么建议 HOLD？", "这个模块应该怎么用？"],
+        "closed_loop_role": "提供建议、解释和操作引导，但不直接下单。",
+    },
+    {
+        "id": "strategy",
+        "name": "策略中心",
+        "route": "/strategy",
+        "purpose": "运行策略模板、查看信号、执行回测和比较策略表现。",
+        "key_actions": ["加载策略模板", "运行策略", "执行回测", "查看信号和结果"],
+        "common_questions": ["RSI 策略适合当前行情吗？", "哪个策略回撤更低？"],
+        "closed_loop_role": "生成候选信号并提供可验证的策略依据。",
+    },
+    {
+        "id": "backtest",
+        "name": "回测中心",
+        "route": "/backtest",
+        "purpose": "验证策略历史表现、收益曲线、回撤和参数稳定性。",
+        "key_actions": ["选择策略", "设置周期", "运行回测", "查看收益和回撤"],
+        "common_questions": ["这个策略有没有过拟合？", "最大回撤是否可接受？"],
+        "closed_loop_role": "在进入模拟执行前验证策略质量。",
+    },
+    {
+        "id": "portfolio",
+        "name": "投资组合",
+        "route": "/portfolio",
+        "purpose": "查看模拟组合收益、权益曲线、持仓敞口和分组归因。",
+        "key_actions": ["切换时间范围", "查看权益曲线", "按交易对或策略归因"],
+        "common_questions": ["组合风险集中在哪个币？", "资金曲线是否进入回撤？"],
+        "closed_loop_role": "复盘模拟交易结果和 AI/策略建议效果。",
+    },
+    {
+        "id": "account",
+        "name": "账户状态",
+        "route": "/account",
+        "purpose": "查看 USDT 现金、持仓、资金曲线和 PaperBroker 日志。",
+        "key_actions": ["查看现金", "查看持仓", "查看模拟日志", "检查账户权益"],
+        "common_questions": ["当前可用资金是多少？", "哪些持仓风险最大？"],
+        "closed_loop_role": "提供模拟盘资产和执行状态的事实依据。",
+    },
+    {
+        "id": "risk",
+        "name": "风控中心",
+        "route": "/risk",
+        "purpose": "检查最大单笔、最大持仓、禁止做空、禁止杠杆和真实交易关闭状态。",
+        "key_actions": ["查看风控规则", "查看阻断原因", "检查 Kill Switch 状态"],
+        "common_questions": ["这条信号为什么被拒绝？", "当前是否允许生成模拟订单？"],
+        "closed_loop_role": "所有 AI 和策略信号进入模拟执行前的本地审批闸门。",
+    },
+    {
+        "id": "audit",
+        "name": "审计日志",
+        "route": "/audit",
+        "purpose": "追踪 AI 建议、风控审批、模拟订单、撤单和异常事件。",
+        "key_actions": ["查看订单生命周期", "查看拒单记录", "复盘模拟日志"],
+        "common_questions": ["哪条建议生成了订单？", "最近有哪些异常？"],
+        "closed_loop_role": "保留可追溯证据链，方便复盘和排错。",
+    },
+    {
+        "id": "diagnostics",
+        "name": "诊断中心",
+        "route": "/diagnostics",
+        "purpose": "检查行情连接、自动循环、策略状态、缓存和执行质量。",
+        "key_actions": ["查看健康雷达", "检查策略状态", "定位异常线索"],
+        "common_questions": ["哪个模块不健康？", "为什么数据没有刷新？"],
+        "closed_loop_role": "帮助判断系统问题在行情、策略、风控还是执行层。",
+    },
+    {
+        "id": "settings",
+        "name": "系统设置",
+        "route": "/settings",
+        "purpose": "查看模型、提醒音效、连接状态和真实交易安全边界。",
+        "key_actions": ["切换 Flash/Pro", "查看连接状态", "确认真实交易关闭"],
+        "common_questions": ["现在用的是哪个模型？", "真实交易是否关闭？"],
+        "closed_loop_role": "管理工作台偏好和安全默认值。",
+    },
+]
+
+
+class ProjectAssistantContextBuilder:
+    """Build safe project-copilot context for AI chat."""
+
+    @staticmethod
+    def build_base(
+        *,
+        symbol: str,
+        period: str,
+        include_market_context: bool,
+        ai_config: AiAdvisorConfig,
+    ) -> dict[str, Any]:
+        context_mode = "project_and_market" if include_market_context else "project_only"
+        return {
+            "symbol": symbol,
+            "period": period,
+            "assistant_scope": {
+                "role": "HuuQuantAI 项目副驾驶",
+                "can_help_with": [
+                    "正常聊天",
+                    "项目模块使用说明",
+                    "加密货币量化概念解释",
+                    "策略、风控、回测、组合分析",
+                    "模拟交易流程和审计复盘",
+                ],
+                "answer_style": "中文、简洁、实用、可操作",
+            },
+            "project_modules": PROJECT_MODULES,
+            "current_workspace": {
+                "symbol": symbol,
+                "period": period,
+                "context_mode": context_mode,
+                "trading_mode": "paper_trading",
+                "real_trading_status": "disabled",
+            },
+            "available_capabilities": {
+                "normal_chat": True,
+                "project_usage_help": True,
+                "market_analysis": bool(include_market_context),
+                "strategy_explanation": True,
+                "risk_explanation": True,
+                "backtest_explanation": True,
+                "portfolio_review": True,
+                "paper_trading": True,
+                "testnet_ordering_by_ai": False,
+                "real_ordering_by_ai": False,
+            },
+            "safety_boundaries": {
+                "advisory_only": True,
+                "can_place_orders": False,
+                "can_change_config": False,
+                "paper_order_allowed_by_ai": False,
+                "testnet_order_allowed_by_ai": False,
+                "real_trading_allowed": False,
+                "manual_confirm_required": True,
+                "forbidden": ["真实下单", "自动模拟下单", "打开真实交易", "绕过风控", "杠杆", "做空"],
+            },
+            "ai_limits": {
+                "mode": ai_config.mode,
+                "manual_confirm_required": True,
+                "auto_paper_order_enabled": False,
+                "real_trading_allowed": False,
+            },
+            "suggested_questions": [
+                "这个项目怎么用？",
+                "自动交易为什么没有下单？",
+                "风控中心这些指标是什么意思？",
+                f"帮我解释当前 {symbol} 的模拟账户风险",
+                "策略中心和回测中心有什么区别？",
+            ],
+        }
+
+    @staticmethod
+    def runtime_summary(
+        *,
+        account: dict[str, Any],
+        positions: list[dict[str, Any]],
+        recent_orders: list[dict[str, Any]],
+        quote: dict[str, Any],
+        macro: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "account": {
+                "cash": account.get("cash"),
+                "available_cash": account.get("available_cash"),
+                "equity": account.get("equity") or account.get("total_equity"),
+            },
+            "positions_count": len(positions or []),
+            "recent_orders_count": len(recent_orders or []),
+            "quote": {
+                "symbol": quote.get("symbol"),
+                "price": quote.get("price"),
+                "change": quote.get("change"),
+                "source": quote.get("source"),
+            },
+            "macro_state": macro.get("gate", macro) if isinstance(macro, dict) else {},
+        }
 
 
 class AiChatAssistant:

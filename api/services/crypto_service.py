@@ -78,7 +78,7 @@ from api.models.response import (
     WalkForwardSymbolSummaryResponse,
     WalkForwardConfigResponse,
 )
-from core.ai_chat_assistant import AiChatAssistant, AiChatStore
+from core.ai_chat_assistant import AiChatAssistant, AiChatStore, ProjectAssistantContextBuilder
 from core.ai_signal_advisor import (
     AiAdvisorConfig,
     AiSignalAdvisor,
@@ -1192,17 +1192,14 @@ class CryptoService:
         limit: int,
         include_context: bool,
     ) -> dict[str, Any]:
+        project_context = ProjectAssistantContextBuilder.build_base(
+            symbol=symbol,
+            period=period,
+            include_market_context=include_context,
+            ai_config=self.ai_config,
+        )
         if not include_context:
-            return {
-                "symbol": symbol,
-                "period": period,
-                "ai_limits": {
-                    "mode": self.ai_config.mode,
-                    "manual_confirm_required": True,
-                    "auto_paper_order_enabled": False,
-                    "real_trading_allowed": False,
-                },
-            }
+            return project_context
 
         safe_limit = min(int(limit or 120), self.ai_config.max_context_candles)
         quote_response = await self.get_quotes([symbol])
@@ -1229,6 +1226,14 @@ class CryptoService:
             macro=macro,
         )
         summary = AiSignalContextBuilder.summarize(context)
+        summary.update(project_context)
+        summary["runtime_summary"] = ProjectAssistantContextBuilder.runtime_summary(
+            account=account,
+            positions=positions,
+            recent_orders=recent_orders,
+            quote=quote,
+            macro=macro,
+        )
         summary["advisory_only"] = True
         summary["paper_order_allowed_by_ai"] = False
         summary["testnet_order_allowed_by_ai"] = False

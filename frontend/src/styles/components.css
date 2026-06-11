@@ -787,6 +787,29 @@ th {
   background: rgba(20, 217, 210, 0.06);
 }
 
+.ai-chat-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.ai-chat-suggestions button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(116, 96, 255, 0.34);
+  border-radius: 999px;
+  background: rgba(116, 96, 255, 0.14);
+  color: #f3f4ff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.ai-chat-suggestions button:hover {
+  border-color: rgba(20, 217, 210, 0.52);
+  background: rgba(20, 217, 210, 0.12);
+}
+
 .ai-chat-message {
   display: grid;
   gap: 8px;

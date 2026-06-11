@@ -245,6 +245,47 @@ def test_ai_chat_without_context_skips_market_fetch_and_hides_secrets(monkeypatc
     assert result.assistant_message.content.startswith("仅基于问题")
 
 
+def test_ai_chat_without_market_context_still_includes_project_copilot_knowledge(tmp_path):
+    service = _service(tmp_path)
+    service.ai_chat_assistant.chat = MagicMock(return_value={"model": "gpt-5.2", "content": "我是项目副驾驶，可以解释每个模块。"})
+
+    result = _run(
+        service.chat_ai_assistant(
+            AiChatRequest(message="这个项目怎么用？", symbol="BTC/USDT", include_context=False)
+        )
+    )
+
+    service.get_quotes.assert_not_called()
+    service.get_klines.assert_not_called()
+    context = service.ai_chat_assistant.chat.call_args.kwargs["context_summary"]
+    assert context["assistant_scope"]["role"] == "HuuQuantAI 项目副驾驶"
+    assert "正常聊天" in context["assistant_scope"]["can_help_with"]
+    module_ids = {item["id"] for item in context["project_modules"]}
+    assert {"dashboard", "market", "manual_trade", "risk", "settings"}.issubset(module_ids)
+    assert context["safety_boundaries"]["real_trading_allowed"] is False
+    assert context["safety_boundaries"]["can_place_orders"] is False
+    assert "这个项目怎么用？" in context["suggested_questions"]
+    assert result.context_summary["current_workspace"]["symbol"] == "BTC/USDT"
+
+
+def test_ai_chat_with_context_adds_project_workspace_and_runtime_summary(tmp_path):
+    service = _service(tmp_path)
+    service.ai_chat_assistant.chat = MagicMock(return_value={"model": "gpt-5.2", "content": "当前模拟账户现金充足。"})
+
+    _run(service.chat_ai_assistant(AiChatRequest(message="帮我解释当前账户和风控", symbol="BTC/USDT")))
+
+    context = service.ai_chat_assistant.chat.call_args.kwargs["context_summary"]
+    assert context["current_workspace"]["context_mode"] == "project_and_market"
+    assert context["available_capabilities"]["paper_trading"] is True
+    assert context["available_capabilities"]["project_usage_help"] is True
+    assert context["runtime_summary"]["account"]["cash"] == 1000
+    assert context["runtime_summary"]["positions_count"] == 1
+    assert context["runtime_summary"]["recent_orders_count"] == 1
+    assert context["real_order_allowed_by_ai"] is False
+    service.paper_broker.place_order.assert_not_called()
+    service.testnet_executor.place_order.assert_not_called()
+
+
 def test_ai_chat_api_routes(tmp_path):
     service = _service(tmp_path)
     service.ai_chat_assistant.chat = MagicMock(return_value={"model": "gpt-5.2", "content": "模拟研究建议。"})

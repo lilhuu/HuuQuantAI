@@ -5,7 +5,9 @@ import { shallowMount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 
 import { apiClient } from "../lib/api";
+import AiChatDrawer from "../components/AiChatDrawer.vue";
 import FeatureCommandView from "../components/FeatureCommandView.vue";
+import { useAiChatStore } from "../stores/aiChat";
 
 vi.mock("vue-router", async () => {
   const actual = await vi.importActual("vue-router");
@@ -120,6 +122,27 @@ describe("view smoke tests", () => {
 
     expect(wrapper.findComponent(FeatureCommandView).props("feature")).toBe("settings");
     expect(wrapper.findComponent({ name: "AccountView" }).exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("renders AI chat drawer as a project copilot", () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const aiChat = useAiChatStore();
+    aiChat.drawerOpen = true;
+
+    const wrapper = shallowMount(AiChatDrawer, {
+      global: {
+        plugins: [pinia],
+        stubs: { Teleport: true },
+      },
+    });
+
+    const text = wrapper.text();
+    expect(text).toContain("项目副驾驶");
+    expect(text).toContain("这个项目怎么用");
+    expect(text).toContain("风控中心");
+    expect(text).toContain("带项目和行情上下文");
     wrapper.unmount();
   });
 });
