@@ -103,6 +103,10 @@ class AiChatRequest(BaseModel):
     period: Literal["1m", "5m", "15m", "1h", "4h", "1d"] = "1h"
     limit: int = Field(default=120, ge=30, le=500)
     include_context: bool = True
+    current_route: str | None = Field(default=None, max_length=128)
+    current_module: str | None = Field(default=None, max_length=64)
+    current_view_title: str | None = Field(default=None, max_length=80)
+    visible_context: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("symbol")
     @classmethod
@@ -119,6 +123,14 @@ class AiChatRequest(BaseModel):
         if not stripped:
             raise ValueError("message is required")
         return stripped
+
+    @field_validator("current_route", "current_module", "current_view_title")
+    @classmethod
+    def strip_ai_chat_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = str(value or "").strip()
+        return stripped or None
 
 
 class BinanceTestnetCredentialsRequest(BaseModel):

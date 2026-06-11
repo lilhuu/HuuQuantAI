@@ -9,11 +9,15 @@ import AiChatDrawer from "../components/AiChatDrawer.vue";
 import FeatureCommandView from "../components/FeatureCommandView.vue";
 import { useAiChatStore } from "../stores/aiChat";
 
+const routeState = vi.hoisted(() => ({
+  current: { path: "/", name: "dashboard", query: {}, meta: { title: "仪表盘" } },
+}));
+
 vi.mock("vue-router", async () => {
   const actual = await vi.importActual("vue-router");
   return {
     ...actual,
-    useRoute: () => ({ path: "/", query: {}, meta: {} }),
+    useRoute: () => routeState.current,
     useRouter: () => ({ push: vi.fn() }),
   };
 });
@@ -72,6 +76,7 @@ describe("view smoke tests", () => {
       },
     );
     mockApiClient();
+    routeState.current = { path: "/", name: "dashboard", query: {}, meta: { title: "仪表盘" } };
     setActivePinia(createPinia());
   });
 
@@ -143,6 +148,25 @@ describe("view smoke tests", () => {
     expect(text).toContain("这个项目怎么用");
     expect(text).toContain("风控中心");
     expect(text).toContain("带项目和行情上下文");
+    wrapper.unmount();
+  });
+
+  it("renders route-specific AI chat suggestions", () => {
+    routeState.current = { path: "/risk", name: "risk", query: {}, meta: { title: "风控中心" } };
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const aiChat = useAiChatStore();
+    aiChat.drawerOpen = true;
+
+    const wrapper = shallowMount(AiChatDrawer, {
+      global: {
+        plugins: [pinia],
+        stubs: { Teleport: true },
+      },
+    });
+
+    expect(wrapper.text()).toContain("这个风控阻断是什么意思");
+    expect(wrapper.text()).not.toContain("为什么自动交易没有下单");
     wrapper.unmount();
   });
 });

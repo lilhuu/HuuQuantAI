@@ -148,6 +148,64 @@ PROJECT_MODULES: list[dict[str, Any]] = [
     },
 ]
 
+MODULE_ALIASES = {
+    "dashboard": "dashboard",
+    "market": "market",
+    "trade": "manual_trade",
+    "manual_trade": "manual_trade",
+    "auto": "auto_trade",
+    "auto_trade": "auto_trade",
+    "ai": "ai_assistant",
+    "ai_assistant": "ai_assistant",
+    "strategy": "strategy",
+    "backtest": "backtest",
+    "portfolio": "portfolio",
+    "account": "account",
+    "risk": "risk",
+    "audit": "audit",
+    "diagnostics": "diagnostics",
+    "settings": "settings",
+}
+
+ROUTE_MODULE_MAP = {
+    "/": "dashboard",
+    "/market": "market",
+    "/trade": "manual_trade",
+    "/auto": "auto_trade",
+    "/ai": "ai_assistant",
+    "/strategy": "strategy",
+    "/backtest": "backtest",
+    "/portfolio": "portfolio",
+    "/account": "account",
+    "/risk": "risk",
+    "/audit": "audit",
+    "/diagnostics": "diagnostics",
+    "/settings": "settings",
+}
+
+ROUTE_SUGGESTED_QUESTIONS = {
+    "dashboard": ["帮我总结当前系统状态", "当前最重要的风险是什么？", "下一步应该检查哪个模块？"],
+    "market": ["帮我解释当前 K 线走势", "成交量有没有确认趋势？", "当前行情适合观察哪些风险？"],
+    "manual_trade": ["这笔模拟单提交前要检查什么", "卖出会不会超过持仓？", "这笔订单可能被哪些风控挡住？"],
+    "auto_trade": ["为什么自动交易没有下单", "最近一次扫描卡在哪一步？", "自动交易配置应该先看哪里？"],
+    "ai_assistant": ["AI 为什么给这个建议？", "这个建议能不能生成模拟订单？", "AI 的风险提示该怎么看？"],
+    "strategy": ["当前策略结果怎么看", "哪个策略信号更可靠？", "策略冲突时应该看哪些字段？"],
+    "backtest": ["这次回测结果该看哪些指标", "最大回撤是否可接受？", "这组参数有没有过拟合风险？"],
+    "portfolio": ["帮我分析当前组合风险", "组合收益主要来自哪里？", "仓位是否过于集中？"],
+    "account": ["帮我解释当前模拟账户状态", "当前可用资金够不够？", "哪些持仓需要重点关注？"],
+    "risk": ["这个风控阻断是什么意思", "当前是否允许生成模拟订单？", "怎样理解最大单笔和持仓限制？"],
+    "audit": ["帮我复盘最近订单生命周期", "最近有哪些拒单或异常？", "哪条 AI 建议关联了模拟订单？"],
+    "diagnostics": ["当前系统哪里可能不健康", "为什么数据没有刷新？", "策略或行情连接是否异常？"],
+    "settings": ["当前 AI 和交易安全配置是否正常", "现在使用的是 Flash 还是 Pro？", "真实交易是否保持关闭？"],
+}
+
+DEFAULT_SUGGESTED_QUESTIONS = [
+    "这个项目怎么用？",
+    "自动交易为什么没有下单？",
+    "风控中心这些指标是什么意思？",
+    "策略中心和回测中心有什么区别？",
+]
+
 
 class ProjectAssistantContextBuilder:
     """Build safe project-copilot context for AI chat."""
@@ -159,8 +217,21 @@ class ProjectAssistantContextBuilder:
         period: str,
         include_market_context: bool,
         ai_config: AiAdvisorConfig,
+        current_route: str | None = None,
+        current_module: str | None = None,
+        current_view_title: str | None = None,
+        visible_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         context_mode = "project_and_market" if include_market_context else "project_only"
+        active_module = ProjectAssistantContextBuilder.find_module(
+            current_module=current_module,
+            current_route=current_route,
+        )
+        route_questions = (
+            ROUTE_SUGGESTED_QUESTIONS.get(str(active_module.get("id") or ""), [])
+            if active_module
+            else DEFAULT_SUGGESTED_QUESTIONS
+        )
         return {
             "symbol": symbol,
             "period": period,
@@ -182,6 +253,11 @@ class ProjectAssistantContextBuilder:
                 "context_mode": context_mode,
                 "trading_mode": "paper_trading",
                 "real_trading_status": "disabled",
+                "current_route": current_route or "",
+                "current_module": active_module.get("id") if active_module else (current_module or ""),
+                "current_view_title": current_view_title or active_module.get("name", "") if active_module else current_view_title or "",
+                "active_module": active_module.get("id") if active_module else "",
+                "visible_context": ProjectAssistantContextBuilder.sanitize_visible_context(visible_context or {}),
             },
             "available_capabilities": {
                 "normal_chat": True,
@@ -211,14 +287,52 @@ class ProjectAssistantContextBuilder:
                 "auto_paper_order_enabled": False,
                 "real_trading_allowed": False,
             },
-            "suggested_questions": [
-                "这个项目怎么用？",
-                "自动交易为什么没有下单？",
-                "风控中心这些指标是什么意思？",
-                f"帮我解释当前 {symbol} 的模拟账户风险",
-                "策略中心和回测中心有什么区别？",
-            ],
+            "active_module_guide": active_module or {},
+            "route_suggested_questions": route_questions,
+            "suggested_questions": route_questions
+            if active_module
+            else [*DEFAULT_SUGGESTED_QUESTIONS, f"帮我解释当前 {symbol} 的模拟账户风险"],
         }
+
+    @staticmethod
+    def find_module(*, current_module: str | None = None, current_route: str | None = None) -> dict[str, Any]:
+        module_id = ""
+        if current_module:
+            module_id = MODULE_ALIASES.get(str(current_module).strip().strip("/"), "")
+        if not module_id and current_route:
+            path = "/" + str(current_route).strip().split("?", 1)[0].strip("/")
+            if path == "/":
+                module_id = "dashboard"
+            else:
+                module_id = ROUTE_MODULE_MAP.get(path, "")
+        for module in PROJECT_MODULES:
+            if module.get("id") == module_id:
+                return dict(module)
+        return {}
+
+    @staticmethod
+    def sanitize_visible_context(value: Any, *, depth: int = 0) -> Any:
+        if depth >= 4:
+            return "[truncated]"
+        if isinstance(value, dict):
+            sanitized: dict[str, Any] = {}
+            for index, (key, item) in enumerate(value.items()):
+                if index >= 24:
+                    sanitized["__truncated__"] = True
+                    break
+                key_text = str(key)[:80]
+                if any(token in key_text.lower() for token in ["api_key", "secret", "password", "token"]):
+                    sanitized[key_text] = "[redacted]"
+                else:
+                    sanitized[key_text] = ProjectAssistantContextBuilder.sanitize_visible_context(item, depth=depth + 1)
+            return sanitized
+        if isinstance(value, list):
+            return [ProjectAssistantContextBuilder.sanitize_visible_context(item, depth=depth + 1) for item in value[:12]]
+        if isinstance(value, str):
+            return value[:500]
+        if isinstance(value, (int, float, bool)) or value is None:
+            return value
+        return str(value)[:500]
 
     @staticmethod
     def runtime_summary(

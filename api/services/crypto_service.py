@@ -817,6 +817,10 @@ class CryptoService:
             period=request.period,
             limit=request.limit,
             include_context=request.include_context,
+            current_route=request.current_route,
+            current_module=request.current_module,
+            current_view_title=request.current_view_title,
+            visible_context=request.visible_context,
         )
         recent_messages = self.ai_chat_store.list_messages(session_id, limit=12) if session_id else []
         try:
@@ -1191,12 +1195,20 @@ class CryptoService:
         period: str,
         limit: int,
         include_context: bool,
+        current_route: str | None = None,
+        current_module: str | None = None,
+        current_view_title: str | None = None,
+        visible_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         project_context = ProjectAssistantContextBuilder.build_base(
             symbol=symbol,
             period=period,
             include_market_context=include_context,
             ai_config=self.ai_config,
+            current_route=current_route,
+            current_module=current_module,
+            current_view_title=current_view_title,
+            visible_context=visible_context,
         )
         if not include_context:
             return project_context

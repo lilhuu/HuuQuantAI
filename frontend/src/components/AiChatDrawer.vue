@@ -1,11 +1,21 @@
 <script setup>
 import { computed, nextTick, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 
 import { normalizeCryptoSymbol } from "../lib/tradingUtils";
+import { useAiAdvisorStore } from "../stores/aiAdvisor";
 import { useAiChatStore } from "../stores/aiChat";
+import { useAutoTradingStore } from "../stores/autoTrading";
+import { useMarketStore } from "../stores/market";
+import { useSystemStore } from "../stores/system";
 import { useTradingStore } from "../stores/trading";
 
+const route = useRoute();
+const aiAdvisor = useAiAdvisorStore();
 const aiChat = useAiChatStore();
+const autoTrading = useAutoTradingStore();
+const market = useMarketStore();
+const system = useSystemStore();
 const trading = useTradingStore();
 
 const draft = ref("");
@@ -21,7 +31,37 @@ const modelOptions = [
   { label: "Flash", value: "deepseek-v4-flash" },
   { label: "Pro", value: "deepseek-v4-pro" },
 ];
-const suggestedQuestions = [
+const routeModuleMap = {
+  "/": "dashboard",
+  "/market": "market",
+  "/trade": "manual_trade",
+  "/auto": "auto_trade",
+  "/ai": "ai_assistant",
+  "/strategy": "strategy",
+  "/backtest": "backtest",
+  "/portfolio": "portfolio",
+  "/account": "account",
+  "/risk": "risk",
+  "/audit": "audit",
+  "/diagnostics": "diagnostics",
+  "/settings": "settings",
+};
+const routeQuestionMap = {
+  dashboard: ["帮我总结当前系统状态", "当前最重要的风险是什么？", "下一步应该检查哪个模块？"],
+  market: ["帮我解释当前 K 线走势", "成交量有没有确认趋势？", "当前行情适合观察哪些风险？"],
+  manual_trade: ["这笔模拟单提交前要检查什么", "卖出会不会超过持仓？", "这笔订单可能被哪些风控挡住？"],
+  auto_trade: ["为什么自动交易没有下单", "最近一次扫描卡在哪一步？", "自动交易配置应该先看哪里？"],
+  ai_assistant: ["AI 为什么给这个建议？", "这个建议能不能生成模拟订单？", "AI 的风险提示该怎么看？"],
+  strategy: ["当前策略结果怎么看", "哪个策略信号更可靠？", "策略冲突时应该看哪些字段？"],
+  backtest: ["这次回测结果该看哪些指标", "最大回撤是否可接受？", "这组参数有没有过拟合风险？"],
+  portfolio: ["帮我分析当前组合风险", "组合收益主要来自哪里？", "仓位是否过于集中？"],
+  account: ["帮我解释当前模拟账户状态", "当前可用资金够不够？", "哪些持仓需要重点关注？"],
+  risk: ["这个风控阻断是什么意思", "当前是否允许生成模拟订单？", "怎样理解最大单笔和持仓限制？"],
+  audit: ["帮我复盘最近订单生命周期", "最近有哪些拒单或异常？", "哪条 AI 建议关联了模拟订单？"],
+  diagnostics: ["当前系统哪里可能不健康", "为什么数据没有刷新？", "策略或行情连接是否异常？"],
+  settings: ["当前 AI 和交易安全配置是否正常", "现在使用的是 Flash 还是 Pro？", "真实交易是否保持关闭？"],
+};
+const fallbackQuestions = [
   "这个项目怎么用？",
   "自动交易为什么没有下单？",
   "风控中心这些指标是什么意思？",
@@ -34,6 +74,43 @@ const pairOptions = computed(() => {
 });
 
 const canSend = computed(() => draft.value.trim().length > 0 && !aiChat.loading);
+const currentRoutePath = computed(() => route.path || "/");
+const currentModule = computed(() => routeModuleMap[currentRoutePath.value] || "");
+const currentViewTitle = computed(() => route.meta?.title || route.name || "HuuQuantAI");
+const suggestedQuestions = computed(() => {
+  const routeQuestions = routeQuestionMap[currentModule.value] || fallbackQuestions;
+  return ["这个项目怎么用？", ...routeQuestions].slice(0, 4);
+});
+const visibleContext = computed(() => ({
+  route: currentRoutePath.value,
+  module: currentModule.value,
+  selected_symbol: symbol.value,
+  selected_period: period.value,
+  kline_limit: Number(limit.value || 120),
+  selected_model: selectedModel.value,
+  include_project_and_market_context: includeContext.value,
+  market: {
+    quote_count: market.cryptoQuotes?.length || 0,
+    kline_count: market.cryptoKlines?.length || 0,
+    socket_state: market.marketSocketState || "",
+  },
+  account: {
+    cash: system.liveCash,
+    account_value: system.liveAccountValue,
+    position_value: system.livePositionValue,
+    positions_count: system.cryptoPositions?.length || 0,
+    orders_count: system.cryptoOrders?.length || 0,
+  },
+  automation: {
+    state: autoTrading.state,
+    loop_running: autoTrading.loopRunning,
+    decisions_count: autoTrading.decisions?.length || 0,
+  },
+  ai: {
+    current_signal_action: aiAdvisor.currentSignal?.action || "",
+    current_signal_status: aiAdvisor.currentSignal?.approval_status || "",
+  },
+}));
 
 function scrollToBottom() {
   nextTick(() => {
@@ -60,6 +137,10 @@ async function send() {
     limit: limit.value,
     include_context: includeContext.value,
     model: selectedModel.value,
+    current_route: currentRoutePath.value,
+    current_module: currentModule.value,
+    current_view_title: String(currentViewTitle.value || ""),
+    visible_context: visibleContext.value,
   });
   scrollToBottom();
 }
@@ -156,7 +237,7 @@ watch(
                 <strong>真实交易关闭，AI 是项目副驾驶，不能直接下单。</strong>
                 <p>
                   可以正常聊天，也可以问项目怎么用、每个模块做什么、策略和回测怎么理解、
-                  风控为什么阻断、模拟账户和订单状态怎么看。
+                  风控中心为什么阻断、模拟账户和订单状态怎么看。
                 </p>
                 <div class="ai-chat-suggestions" aria-label="推荐问题">
                   <button
@@ -180,7 +261,7 @@ watch(
               </article>
               <article v-if="aiChat.loading" class="ai-chat-message ai-chat-message--assistant">
                 <span>AI</span>
-                <p>正在结合项目模块、行情、账户和风控状态思考...</p>
+                <p>正在结合当前页面、项目模块、行情、账户和风控状态思考...</p>
               </article>
             </div>
 
@@ -190,7 +271,7 @@ watch(
               <textarea
                 v-model="draft"
                 rows="3"
-                placeholder="例如：这个项目怎么用？自动交易为什么没有下单？风控中心这些指标是什么意思？"
+                placeholder="例如：这个页面怎么用？为什么这里没有下单？这个风控阻断是什么意思？"
                 @keydown="handleKeydown"
               ></textarea>
               <div class="ai-chat-actions">

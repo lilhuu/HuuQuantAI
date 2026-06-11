@@ -82,4 +82,35 @@ describe("aiChat store", () => {
       expect.objectContaining({ model: "deepseek-v4-pro" }),
     );
   });
+
+  it("passes current page context when provided", async () => {
+    vi.spyOn(apiClient, "post").mockResolvedValueOnce({
+      data: {
+        session: { session_id: "AICHAT_3", title: "risk", message_count: 2 },
+        user_message: { message_id: "U3", role: "user", content: "这个是什么意思？" },
+        assistant_message: { message_id: "A3", role: "assistant", content: "这是风控阻断说明。" },
+      },
+    });
+    vi.spyOn(apiClient, "get").mockResolvedValueOnce({ data: { items: [], total: 0 } });
+
+    const store = useAiChatStore();
+    await store.sendMessage({
+      message: "这个是什么意思？",
+      symbol: "BTC/USDT",
+      current_route: "/risk",
+      current_module: "risk",
+      current_view_title: "风控中心",
+      visible_context: { risk_state: "blocked" },
+    });
+
+    expect(apiClient.post).toHaveBeenCalledWith(
+      "/crypto/ai/chat",
+      expect.objectContaining({
+        current_route: "/risk",
+        current_module: "risk",
+        current_view_title: "风控中心",
+        visible_context: { risk_state: "blocked" },
+      }),
+    );
+  });
 });

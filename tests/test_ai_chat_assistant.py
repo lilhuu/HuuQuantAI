@@ -286,6 +286,61 @@ def test_ai_chat_with_context_adds_project_workspace_and_runtime_summary(tmp_pat
     service.testnet_executor.place_order.assert_not_called()
 
 
+def test_ai_chat_current_route_adds_active_module_guide(tmp_path):
+    service = _service(tmp_path)
+    service.ai_chat_assistant.chat = MagicMock(return_value={"model": "gpt-5.2", "content": "风控中心会解释阻断原因。"})
+
+    _run(
+        service.chat_ai_assistant(
+            AiChatRequest(
+                message="这个是什么意思？",
+                symbol="BTC/USDT",
+                include_context=False,
+                current_route="/risk",
+                current_view_title="风控中心",
+                visible_context={"risk_state": "blocked", "reason": "max_order_notional"},
+            )
+        )
+    )
+
+    context = service.ai_chat_assistant.chat.call_args.kwargs["context_summary"]
+    assert context["current_workspace"]["current_route"] == "/risk"
+    assert context["current_workspace"]["current_module"] == "risk"
+    assert context["current_workspace"]["current_view_title"] == "风控中心"
+    assert context["current_workspace"]["visible_context"]["risk_state"] == "blocked"
+    assert context["active_module_guide"]["id"] == "risk"
+    assert context["active_module_guide"]["name"] == "风控中心"
+    assert "这个风控阻断是什么意思" in context["route_suggested_questions"]
+
+
+def test_ai_chat_current_module_overrides_route_and_sanitizes_visible_context(tmp_path):
+    service = _service(tmp_path)
+    service.ai_chat_assistant.chat = MagicMock(return_value={"model": "gpt-5.2", "content": "自动交易页面会解释扫描链路。"})
+
+    _run(
+        service.chat_ai_assistant(
+            AiChatRequest(
+                message="为什么没下单？",
+                symbol="BTC/USDT",
+                include_context=False,
+                current_route="/unknown",
+                current_module="auto_trade",
+                visible_context={
+                    "status": "paused",
+                    "nested": {"orders": [1, 2, 3], "secret_like": "safe-public-state"},
+                    "large_text": "x" * 2000,
+                },
+            )
+        )
+    )
+
+    context = service.ai_chat_assistant.chat.call_args.kwargs["context_summary"]
+    assert context["current_workspace"]["current_module"] == "auto_trade"
+    assert context["active_module_guide"]["id"] == "auto_trade"
+    assert "为什么自动交易没有下单" in context["route_suggested_questions"]
+    assert len(context["current_workspace"]["visible_context"]["large_text"]) <= 520
+
+
 def test_ai_chat_api_routes(tmp_path):
     service = _service(tmp_path)
     service.ai_chat_assistant.chat = MagicMock(return_value={"model": "gpt-5.2", "content": "模拟研究建议。"})
