@@ -810,6 +810,45 @@ th {
   background: rgba(20, 217, 210, 0.12);
 }
 
+.ai-chat-section-title {
+  display: block;
+  margin-top: 14px;
+  color: #a6afc2;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.ai-chat-guide {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(154, 182, 214, 0.12);
+}
+
+.ai-chat-guide span {
+  grid-column: 1 / -1;
+  color: #a6afc2;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.ai-chat-guide button {
+  min-height: 36px;
+  border: 1px solid rgba(116, 96, 255, 0.28);
+  border-radius: 8px;
+  color: #e7e8ff;
+  background: rgba(116, 96, 255, 0.14);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.ai-chat-guide button:hover {
+  border-color: rgba(20, 217, 210, 0.44);
+  background: rgba(20, 217, 210, 0.1);
+}
+
 .ai-chat-message {
   display: grid;
   gap: 8px;

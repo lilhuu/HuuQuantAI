@@ -54,7 +54,7 @@ const router = createRouter({
           path: "market",
           name: "market",
           component: MarketView,
-          meta: { title: "市场行情", requiresAuth: true },
+          meta: { title: "市场分析", requiresAuth: true },
         },
         {
           path: "trade",
@@ -78,25 +78,25 @@ const router = createRouter({
           path: "strategy",
           name: "strategy",
           component: StrategyView,
-          meta: { title: "策略中心", requiresAuth: true },
+          meta: { title: "策略验证", requiresAuth: true },
         },
         {
           path: "risk",
           name: "risk",
           component: ReliabilityView,
-          meta: { title: "风控中心", requiresAuth: true },
+          meta: { title: "执行可靠性", requiresAuth: true },
         },
         {
           path: "audit",
           name: "audit",
           component: AuditView,
-          meta: { title: "审计日志", requiresAuth: true },
+          meta: { title: "监控审计", requiresAuth: true },
         },
         {
           path: "diagnostics",
           name: "diagnostics",
           component: DiagnosticsView,
-          meta: { title: "诊断中心", requiresAuth: true },
+          meta: { title: "策略诊断", requiresAuth: true },
         },
         {
           path: "settings",
@@ -143,6 +143,10 @@ router.beforeEach(async (to) => {
   }
 
   return true;
+});
+
+router.afterEach((to) => {
+  document.title = `${to.meta.title || "工作台"} - HuuQuantAI`;
 });
 
 export default router;

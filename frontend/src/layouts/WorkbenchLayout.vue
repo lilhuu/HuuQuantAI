@@ -32,16 +32,16 @@ const {
 
 const navItems = [
   { label: "仪表盘", icon: "grid", to: "/" },
-  { label: "市场行情", icon: "trend", to: "/market" },
+  { label: "市场分析", icon: "trend", to: "/market" },
   { label: "手动交易", icon: "clock", to: "/trade" },
   { label: "自动交易", icon: "target", to: "/auto" },
   { label: "AI 助手", icon: "target", to: "/ai" },
-  { label: "策略中心", icon: "flask", to: "/strategy" },
-  { label: "回测中心", icon: "audit", to: "/portfolio" },
-  { label: "投资组合", icon: "wallet", to: "/account" },
-  { label: "风控中心", icon: "shield", to: "/risk" },
-  { label: "审计日志", icon: "audit", to: "/audit" },
-  { label: "诊断中心", icon: "target", to: "/diagnostics" },
+  { label: "策略验证", icon: "flask", to: "/strategy" },
+  { label: "投资组合", icon: "wallet", to: "/portfolio" },
+  { label: "账户状态", icon: "wallet", to: "/account" },
+  { label: "执行可靠性", icon: "shield", to: "/risk" },
+  { label: "监控审计", icon: "audit", to: "/audit" },
+  { label: "策略诊断", icon: "target", to: "/diagnostics" },
   { label: "系统设置", icon: "settings", to: "/settings" },
 ];
 
@@ -101,6 +101,10 @@ function clearVisibleError() {
   clearWorkspaceError();
 }
 
+function isActiveNavItem(item) {
+  return route.path === item.to || (item.to !== "/" && route.path.startsWith(`${item.to}/`));
+}
+
 function formatTopPrice(value) {
   const number = Number(value || 0);
   if (!Number.isFinite(number) || number <= 0) return "--";
@@ -125,7 +129,7 @@ function formatTopVolume(value) {
         </div>
         <div>
           <strong>HuuQuantAI</strong>
-          <span>量化交易控制台</span>
+          <span>本地量化工作台</span>
         </div>
       </div>
 
@@ -135,7 +139,7 @@ function formatTopVolume(value) {
           :key="`${item.label}-${item.to}`"
           :to="item.to"
           class="cq-nav__item"
-          :class="{ active: route.path === item.to || item.match?.includes(route.path) }"
+          :class="{ active: isActiveNavItem(item) }"
         >
           <span class="cq-icon" :data-icon="item.icon" aria-hidden="true"></span>
           <span>{{ item.label }}</span>
@@ -149,7 +153,7 @@ function formatTopVolume(value) {
         </div>
         <div class="cq-sidebar-status-row">
           <span>行情连接</span>
-          <strong>已连接</strong>
+          <strong>实时监听</strong>
         </div>
         <div class="cq-sidebar-status-row">
           <span>交易引擎</span>
@@ -162,8 +166,8 @@ function formatTopVolume(value) {
     <section class="cq-main">
       <header class="cq-topbar">
         <div class="cq-market-strip">
-          <button class="cq-menu-button" type="button" title="折叠菜单">☰</button>
-          <select v-model="selectedCryptoSymbol" class="cq-pair-select" @change="changeSymbol">
+          <button class="cq-menu-button" type="button" title="主菜单" aria-label="主菜单">☰</button>
+          <select v-model="selectedCryptoSymbol" class="cq-pair-select" aria-label="选择交易对" @change="changeSymbol">
             <option v-for="symbol in pairOptions" :key="symbol" :value="symbol">{{ symbol }}</option>
           </select>
           <span class="cq-favorite-star" aria-hidden="true">★</span>
@@ -172,30 +176,30 @@ function formatTopVolume(value) {
             <strong>{{ priceText }}</strong>
           </div>
           <div class="cq-top-stat cq-top-stat--green">
-            <span>24h涨跌</span>
+            <span>24h 涨跌</span>
             <strong :class="changeClass">{{ changeText }}</strong>
           </div>
           <div class="cq-top-stat">
-            <span>24h最高</span>
+            <span>24h 最高</span>
             <strong>{{ highText }}</strong>
           </div>
           <div class="cq-top-stat">
-            <span>24h最低</span>
+            <span>24h 最低</span>
             <strong>{{ lowText }}</strong>
           </div>
           <div class="cq-top-stat cq-top-stat--volume">
-            <span>24h成交量</span>
+            <span>24h 成交量</span>
             <strong>{{ volumeText }}</strong>
           </div>
           <div class="cq-period-pill">
             <strong>{{ periodText }}</strong>
-            <span>⌄</span>
+            <span>周期</span>
           </div>
         </div>
 
         <div class="cq-top-actions">
-          <div class="cq-model-toggle" aria-label="模型">
-            <span>模型</span>
+          <div class="cq-model-toggle" aria-label="AI 模型">
+            <span>AI 模型</span>
             <div>
               <button class="active" type="button">Flash</button>
               <button type="button">Pro</button>
@@ -209,10 +213,15 @@ function formatTopVolume(value) {
             <span>真实交易</span>
             <strong class="number-down">已关闭</strong>
           </div>
-          <button class="cq-icon-button cq-user-button" :title="authStore.user?.username || 'admin'" @click="aiChat.openDrawer()">
-            <span aria-hidden="true">●</span>
+          <button
+            class="cq-icon-button cq-user-button"
+            :title="`打开 AI 助手：${authStore.user?.username || 'admin'}`"
+            aria-label="打开 AI 助手"
+            @click="aiChat.openDrawer()"
+          >
+            <span aria-hidden="true">AI</span>
           </button>
-          <button class="cq-icon-button" title="刷新" @click="refreshWorkspace">↻</button>
+          <button class="cq-icon-button" title="刷新工作台" aria-label="刷新工作台" @click="refreshWorkspace">↻</button>
           <button class="cq-outline-button cq-logout-button" @click="logout">退出</button>
         </div>
       </header>
@@ -222,7 +231,7 @@ function formatTopVolume(value) {
           <strong>{{ visibleErrorInfo.title }}</strong>
           <p>{{ visibleErrorInfo.message }}</p>
         </div>
-        <button class="cq-outline-button" @click="clearVisibleError">知道了</button>
+        <button class="cq-outline-button" @click="clearVisibleError">我知道了</button>
       </section>
 
       <main class="cq-content">

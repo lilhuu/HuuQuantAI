@@ -49,6 +49,8 @@ export const useAiChatStore = defineStore("ai-chat", () => {
         ...(payload.current_module ? { current_module: payload.current_module } : {}),
         ...(payload.current_view_title ? { current_view_title: payload.current_view_title } : {}),
         ...(payload.visible_context ? { visible_context: payload.visible_context } : {}),
+        ...(typeof payload.guide_mode === "boolean" ? { guide_mode: payload.guide_mode } : {}),
+        ...(payload.user_goal ? { user_goal: payload.user_goal } : {}),
         symbol: normalizeCryptoSymbol(payload.symbol || "BTC/USDT"),
         period: payload.period || "1h",
         limit: Number(payload.limit || 120),

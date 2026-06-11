@@ -341,6 +341,78 @@ def test_ai_chat_current_module_overrides_route_and_sanitizes_visible_context(tm
     assert len(context["current_workspace"]["visible_context"]["large_text"]) <= 520
 
 
+def test_ai_chat_strategy_guide_mode_returns_backtest_operation_guide(tmp_path):
+    service = _service(tmp_path)
+    service.ai_chat_assistant.chat = MagicMock(return_value={"model": "gpt-5.2", "content": "按步骤运行策略回测。"})
+
+    _run(
+        service.chat_ai_assistant(
+            AiChatRequest(
+                message="我想跑一次策略回测",
+                symbol="BTC/USDT",
+                include_context=False,
+                current_route="/strategy",
+                current_module="strategy",
+                guide_mode=True,
+                user_goal="跑一次策略回测",
+            )
+        )
+    )
+
+    context = service.ai_chat_assistant.chat.call_args.kwargs["context_summary"]
+    assert context["guide_mode"] is True
+    assert context["active_operation_guide"]["id"] == "strategy_backtest"
+    assert context["active_operation_guide"]["module"] == "strategy"
+    assert len(context["active_operation_guide"]["steps"]) >= 3
+    assert "manual_click" in context["allowed_user_actions"]
+    assert "place_order" in context["forbidden_ai_actions"]
+
+
+def test_ai_chat_auto_guide_mode_selects_no_order_diagnostics(tmp_path):
+    service = _service(tmp_path)
+    service.ai_chat_assistant.chat = MagicMock(return_value={"model": "gpt-5.2", "content": "先检查扫描和风控。"})
+
+    _run(
+        service.chat_ai_assistant(
+            AiChatRequest(
+                message="为什么自动交易没下单？",
+                symbol="BTC/USDT",
+                include_context=False,
+                current_route="/auto",
+                guide_mode=True,
+                user_goal="排查为什么没下单",
+            )
+        )
+    )
+
+    context = service.ai_chat_assistant.chat.call_args.kwargs["context_summary"]
+    assert context["active_operation_guide"]["id"] == "auto_no_order_diagnostics"
+    assert context["active_operation_guide"]["module"] == "auto_trade"
+    assert "auto_no_order_diagnostics" in {item["id"] for item in context["operation_guides"]}
+
+
+def test_ai_chat_risk_guide_mode_selects_risk_block_explanation(tmp_path):
+    service = _service(tmp_path)
+    service.ai_chat_assistant.chat = MagicMock(return_value={"model": "gpt-5.2", "content": "先看阻断原因。"})
+
+    _run(
+        service.chat_ai_assistant(
+            AiChatRequest(
+                message="这个风控阻断是什么意思？",
+                symbol="BTC/USDT",
+                include_context=False,
+                current_route="/risk",
+                guide_mode=True,
+            )
+        )
+    )
+
+    context = service.ai_chat_assistant.chat.call_args.kwargs["context_summary"]
+    assert context["active_operation_guide"]["id"] == "risk_block_explanation"
+    assert context["active_operation_guide"]["module"] == "risk"
+    assert context["active_operation_guide"]["safety_notice"]
+
+
 def test_ai_chat_api_routes(tmp_path):
     service = _service(tmp_path)
     service.ai_chat_assistant.chat = MagicMock(return_value={"model": "gpt-5.2", "content": "模拟研究建议。"})

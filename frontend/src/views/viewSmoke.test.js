@@ -145,14 +145,14 @@ describe("view smoke tests", () => {
 
     const text = wrapper.text();
     expect(text).toContain("项目副驾驶");
-    expect(text).toContain("这个项目怎么用");
+    expect(text).toContain("这个项目怎么用？");
     expect(text).toContain("风控中心");
     expect(text).toContain("带项目和行情上下文");
     wrapper.unmount();
   });
 
   it("renders route-specific AI chat suggestions", () => {
-    routeState.current = { path: "/risk", name: "risk", query: {}, meta: { title: "风控中心" } };
+    routeState.current = { path: "/risk", name: "risk", query: {}, meta: { title: "执行可靠性" } };
     const pinia = createPinia();
     setActivePinia(pinia);
     const aiChat = useAiChatStore();
@@ -165,8 +165,27 @@ describe("view smoke tests", () => {
       },
     });
 
-    expect(wrapper.text()).toContain("这个风控阻断是什么意思");
-    expect(wrapper.text()).not.toContain("为什么自动交易没有下单");
+    expect(wrapper.text()).toContain("这个风控阻断是什么意思？");
+    expect(wrapper.text()).not.toContain("为什么自动交易没有下单？");
+    wrapper.unmount();
+  });
+
+  it("renders guide mode actions for the current route", () => {
+    routeState.current = { path: "/strategy", name: "strategy", query: {}, meta: { title: "策略验证" } };
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const aiChat = useAiChatStore();
+    aiChat.drawerOpen = true;
+
+    const wrapper = shallowMount(AiChatDrawer, {
+      global: {
+        plugins: [pinia],
+        stubs: { Teleport: true },
+      },
+    });
+
+    expect(wrapper.text()).toContain("引导模式");
+    expect(wrapper.text()).toContain("跑一次策略回测");
     wrapper.unmount();
   });
 });

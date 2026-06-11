@@ -113,4 +113,31 @@ describe("aiChat store", () => {
       }),
     );
   });
+
+  it("passes guide mode and user goal when provided", async () => {
+    vi.spyOn(apiClient, "post").mockResolvedValueOnce({
+      data: {
+        session: { session_id: "AICHAT_4", title: "guide", message_count: 2 },
+        user_message: { message_id: "U4", role: "user", content: "run a strategy backtest" },
+        assistant_message: { message_id: "A4", role: "assistant", content: "Follow the guide steps." },
+      },
+    });
+    vi.spyOn(apiClient, "get").mockResolvedValueOnce({ data: { items: [], total: 0 } });
+
+    const store = useAiChatStore();
+    await store.sendMessage({
+      message: "run a strategy backtest",
+      symbol: "BTC/USDT",
+      guide_mode: true,
+      user_goal: "strategy_backtest",
+    });
+
+    expect(apiClient.post).toHaveBeenCalledWith(
+      "/crypto/ai/chat",
+      expect.objectContaining({
+        guide_mode: true,
+        user_goal: "strategy_backtest",
+      }),
+    );
+  });
 });

@@ -23,6 +23,8 @@ const symbol = ref(normalizeCryptoSymbol(trading.selectedCryptoSymbol || "BTC/US
 const period = ref(trading.selectedCryptoPeriod || "1h");
 const limit = ref(120);
 const includeContext = ref(true);
+const guideMode = ref(false);
+const selectedGuideGoal = ref("");
 const selectedModel = ref("deepseek-v4-flash");
 const messageList = ref(null);
 
@@ -49,17 +51,45 @@ const routeModuleMap = {
 const routeQuestionMap = {
   dashboard: ["帮我总结当前系统状态", "当前最重要的风险是什么？", "下一步应该检查哪个模块？"],
   market: ["帮我解释当前 K 线走势", "成交量有没有确认趋势？", "当前行情适合观察哪些风险？"],
-  manual_trade: ["这笔模拟单提交前要检查什么", "卖出会不会超过持仓？", "这笔订单可能被哪些风控挡住？"],
-  auto_trade: ["为什么自动交易没有下单", "最近一次扫描卡在哪一步？", "自动交易配置应该先看哪里？"],
+  manual_trade: ["这笔模拟单提交前要检查什么？", "卖出会不会超过持仓？", "这笔订单可能被哪些风控挡住？"],
+  auto_trade: ["为什么自动交易没有下单？", "最近一次扫描卡在哪一步？", "自动交易配置应该先看哪里？"],
   ai_assistant: ["AI 为什么给这个建议？", "这个建议能不能生成模拟订单？", "AI 的风险提示该怎么看？"],
-  strategy: ["当前策略结果怎么看", "哪个策略信号更可靠？", "策略冲突时应该看哪些字段？"],
-  backtest: ["这次回测结果该看哪些指标", "最大回撤是否可接受？", "这组参数有没有过拟合风险？"],
+  strategy: ["当前策略结果怎么看？", "哪个策略信号更可靠？", "策略冲突时应该看哪些字段？"],
   portfolio: ["帮我分析当前组合风险", "组合收益主要来自哪里？", "仓位是否过于集中？"],
   account: ["帮我解释当前模拟账户状态", "当前可用资金够不够？", "哪些持仓需要重点关注？"],
-  risk: ["这个风控阻断是什么意思", "当前是否允许生成模拟订单？", "怎样理解最大单笔和持仓限制？"],
+  risk: ["这个风控阻断是什么意思？", "当前是否允许生成模拟订单？", "怎样理解最大单笔和持仓限制？"],
   audit: ["帮我复盘最近订单生命周期", "最近有哪些拒单或异常？", "哪条 AI 建议关联了模拟订单？"],
-  diagnostics: ["当前系统哪里可能不健康", "为什么数据没有刷新？", "策略或行情连接是否异常？"],
-  settings: ["当前 AI 和交易安全配置是否正常", "现在使用的是 Flash 还是 Pro？", "真实交易是否保持关闭？"],
+  diagnostics: ["当前系统哪里可能不健康？", "为什么数据没有刷新？", "策略或行情连接是否异常？"],
+  settings: ["当前 AI 和交易安全配置是否正常？", "现在使用的是 Flash 还是 Pro？", "真实交易是否保持关闭？"],
+};
+const routeGuideMap = {
+  dashboard: ["检查行情连接", "查看模拟账户", "打开风险概览"],
+  market: ["解释当前 K 线", "检查盘口深度", "刷新实时行情"],
+  manual_trade: ["检查下单风险", "核对可用资金", "查看最近订单"],
+  auto_trade: ["查看扫描日志", "解释未下单原因", "检查自动交易开关"],
+  ai_assistant: ["解释最新 AI 信号", "检查安全边界", "切换模型对比"],
+  strategy: ["跑一次策略回测", "解释策略冲突", "检查参数过拟合"],
+  portfolio: ["分析组合收益", "检查仓位集中度", "查看资金曲线"],
+  account: ["解释账户权益", "检查持仓风险", "查看成交日志"],
+  risk: ["解释风控阻断", "检查风险预算", "查看真实交易状态"],
+  audit: ["复盘订单生命周期", "检查异常事件", "追踪 AI 建议来源"],
+  diagnostics: ["检查行情健康", "检查策略健康", "定位数据刷新问题"],
+  settings: ["检查 AI 配置", "检查交易安全开关", "确认真实交易关闭"],
+};
+const routeGuideOverrides = {
+  dashboard: ["查看系统状态", "检查安全边界"],
+  market: ["分析行情和 K 线", "检查数据源状态"],
+  manual_trade: ["创建手动模拟订单", "提交前检查风险"],
+  auto_trade: ["排查为什么没下单", "运行一次自动扫描"],
+  ai_assistant: ["解释 AI 建议", "生成模拟订单前检查"],
+  strategy: ["跑一次策略回测", "运行策略信号"],
+  backtest: ["跑一次策略回测", "解释回测指标"],
+  portfolio: ["查看组合风险", "复盘资金曲线"],
+  account: ["检查模拟账户", "核对持仓和订单"],
+  risk: ["查看风控阻断原因", "检查 Kill Switch"],
+  audit: ["复盘订单审计日志", "查找拒单原因"],
+  diagnostics: ["排查系统诊断问题", "检查 AI 是否可用"],
+  settings: ["检查安全配置", "切换模型前确认"],
 };
 const fallbackQuestions = [
   "这个项目怎么用？",
@@ -81,6 +111,9 @@ const suggestedQuestions = computed(() => {
   const routeQuestions = routeQuestionMap[currentModule.value] || fallbackQuestions;
   return ["这个项目怎么用？", ...routeQuestions].slice(0, 4);
 });
+const guideActions = computed(
+  () => routeGuideOverrides[currentModule.value] || routeGuideMap[currentModule.value] || ["查看系统状态", "排查为什么没下单", "跑一次策略回测"],
+);
 const visibleContext = computed(() => ({
   route: currentRoutePath.value,
   module: currentModule.value,
@@ -89,6 +122,8 @@ const visibleContext = computed(() => ({
   kline_limit: Number(limit.value || 120),
   selected_model: selectedModel.value,
   include_project_and_market_context: includeContext.value,
+  guide_mode: guideMode.value,
+  selected_guide_goal: selectedGuideGoal.value,
   market: {
     quote_count: market.cryptoQuotes?.length || 0,
     kline_count: market.cryptoKlines?.length || 0,
@@ -121,7 +156,15 @@ function scrollToBottom() {
 }
 
 function useSuggestedQuestion(question) {
+  guideMode.value = false;
+  selectedGuideGoal.value = "";
   draft.value = question;
+}
+
+function useGuideAction(action) {
+  guideMode.value = true;
+  selectedGuideGoal.value = String(action || "").trim();
+  draft.value = selectedGuideGoal.value;
 }
 
 async function send() {
@@ -141,6 +184,8 @@ async function send() {
     current_module: currentModule.value,
     current_view_title: String(currentViewTitle.value || ""),
     visible_context: visibleContext.value,
+    guide_mode: guideMode.value,
+    user_goal: guideMode.value ? selectedGuideGoal.value || message : "",
   });
   scrollToBottom();
 }
@@ -187,7 +232,7 @@ watch(
             <span>AI 对话助手</span>
             <strong>项目副驾驶</strong>
           </div>
-          <button class="cq-icon-button" title="关闭 AI 对话" @click="aiChat.closeDrawer()">×</button>
+          <button class="cq-icon-button" title="关闭 AI 对话" aria-label="关闭 AI 对话" @click="aiChat.closeDrawer()">×</button>
         </header>
 
         <section class="ai-chat-body">
@@ -230,6 +275,10 @@ watch(
                 <input v-model="includeContext" type="checkbox" />
                 <span>带项目和行情上下文</span>
               </label>
+              <label class="ai-chat-toggle">
+                <input v-model="guideMode" type="checkbox" />
+                <span>引导模式</span>
+              </label>
             </div>
 
             <div ref="messageList" class="ai-chat-messages">
@@ -239,6 +288,7 @@ watch(
                   可以正常聊天，也可以问项目怎么用、每个模块做什么、策略和回测怎么理解、
                   风控中心为什么阻断、模拟账户和订单状态怎么看。
                 </p>
+                <span class="ai-chat-section-title">问项目问题</span>
                 <div class="ai-chat-suggestions" aria-label="推荐问题">
                   <button
                     v-for="question in suggestedQuestions"
@@ -247,6 +297,17 @@ watch(
                     @click="useSuggestedQuestion(question)"
                   >
                     {{ question }}
+                  </button>
+                </div>
+                <div class="ai-chat-guide" aria-label="引导模式">
+                  <span class="ai-chat-section-title">让我一步一步带你操作</span>
+                  <button
+                    v-for="action in guideActions"
+                    :key="action"
+                    type="button"
+                    @click="useGuideAction(action)"
+                  >
+                    {{ action }}
                   </button>
                 </div>
               </div>

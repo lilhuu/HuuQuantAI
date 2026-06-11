@@ -24,7 +24,12 @@ CHAT_SYSTEM_PROMPT = (
     "trading, or bypassing risk checks. You cannot place orders, cannot call paper/testnet/mainnet "
     "trading endpoints, and cannot change trading configuration. If the user asks you to trade, explain "
     "the risk and tell them to use the manual simulated trading controls themselves. Keep answers concise, "
-    "practical, and clearly marked as research, product guidance, or simulated-trading advice."
+    "practical, and clearly marked as research, product guidance, or simulated-trading advice. When "
+    "guide_mode is true, or the user asks how to do something, where to click, how to backtest, or why "
+    "auto trading did not place an order, prefer a step-by-step manual guide with: current judgment, "
+    "operation steps, checkpoints, common failure causes, and a safety reminder. Steps must be manual "
+    "user actions only; never imply that you can click, submit, place orders, cancel orders, or modify "
+    "configuration for the user."
 )
 
 
@@ -207,6 +212,211 @@ DEFAULT_SUGGESTED_QUESTIONS = [
 ]
 
 
+ALLOWED_USER_ACTIONS = [
+    "manual_click",
+    "manual_input",
+    "manual_confirm",
+    "page_navigation",
+    "read_only_review",
+]
+
+FORBIDDEN_AI_ACTIONS = [
+    "place_order",
+    "cancel_order",
+    "enable_real_trading",
+    "change_config",
+    "click_ui",
+    "call_trade_api",
+]
+
+OPERATION_GUIDES: list[dict[str, Any]] = [
+    {
+        "id": "system_overview",
+        "module": "dashboard",
+        "title": "查看系统状态",
+        "goal": "确认行情、账户、风控、AI 和自动交易是否正常",
+        "keywords": ["系统状态", "仪表盘", "总览", "健康", "状态"],
+        "steps": [
+            "进入仪表盘，先看顶部连接状态和当前交易对。",
+            "检查市场概览、AI 建议、风控审批和模拟账户卡片是否有异常提示。",
+            "如果有红色错误或连接断开，再进入诊断中心查看具体模块。",
+        ],
+        "check_points": ["行情连接", "AI 配置", "真实交易关闭", "模拟账户余额", "最近订单状态"],
+        "common_failures": ["行情源不可用", "AI API Key 未配置", "自动交易处于暂停", "风控触发阻断"],
+        "safety_notice": "这里只做状态查看，不会触发任何交易。",
+    },
+    {
+        "id": "market_kline_analysis",
+        "module": "market",
+        "title": "分析行情和 K 线",
+        "goal": "查看交易对趋势、成交量和关键价格区间",
+        "keywords": ["行情", "K线", "K 线", "趋势", "价格", "成交量"],
+        "steps": [
+            "进入市场行情页面，选择交易对和周期。",
+            "加载 K 线后观察均线、最新价、最高点、成交量和最近波动。",
+            "再让 AI 总结趋势，但把结论当作研究建议，不直接作为下单依据。",
+        ],
+        "check_points": ["K 线数量", "最新收盘价", "成交量变化", "数据源状态", "周期是否匹配"],
+        "common_failures": ["交易对格式错误", "行情源超时", "缓存数据过旧", "周期选择过短导致噪音大"],
+        "safety_notice": "行情分析不等于交易信号，仍需经过策略和风控确认。",
+    },
+    {
+        "id": "manual_paper_order",
+        "module": "manual_trade",
+        "title": "创建手动模拟订单",
+        "goal": "手动提交一笔 PaperBroker 模拟买入或卖出",
+        "keywords": ["手动", "模拟订单", "买入", "卖出", "下单", "订单"],
+        "steps": [
+            "进入手动交易页面，确认页面显示的是模拟交易。",
+            "选择交易对、BUY 或 SELL，并填写小数数量和价格。",
+            "提交前检查可用现金、当前持仓、单笔金额和风控提示。",
+            "手动点击提交后，在订单列表和账户状态里复核成交结果。",
+        ],
+        "check_points": ["可用 USDT", "持仓数量", "价格", "数量", "手续费和滑点", "风控限制"],
+        "common_failures": ["现金不足", "卖出超过持仓", "单笔金额超过限制", "价格或数量为 0"],
+        "safety_notice": "AI 只能解释流程，不能替你点击提交或生成订单。",
+    },
+    {
+        "id": "auto_no_order_diagnostics",
+        "module": "auto_trade",
+        "title": "排查自动交易为什么没下单",
+        "goal": "定位自动交易停在行情、策略、宏观门控、风控还是提交阶段",
+        "keywords": ["没下单", "沒有下单", "没有下单", "未下单", "为什么", "排查", "自动交易"],
+        "steps": [
+            "进入自动交易页面，先确认自动交易状态是运行中，且模式仍是 paper。",
+            "检查交易对、周期、扫描间隔、置信度阈值、最大持仓和单笔金额配置。",
+            "点击或等待一次扫描后查看最近决策流水，确认哪一步是 pass、fail 或 skip。",
+            "如果信号通过但没有订单，继续到风控中心看阻断原因，再到审计日志看提交记录。",
+        ],
+        "check_points": ["自动交易状态", "策略信号", "置信度", "宏观门控", "风控审批", "可用现金", "持仓上限"],
+        "common_failures": ["自动交易未启动", "策略信号为 HOLD", "置信度低于阈值", "宏观门控降低信号", "风控拒绝", "现金不足"],
+        "safety_notice": "自动交易仍只允许模拟盘，AI 不会替你启动、暂停或提交订单。",
+    },
+    {
+        "id": "strategy_signal_run",
+        "module": "strategy",
+        "title": "运行策略信号",
+        "goal": "用当前策略模板生成可复核的候选信号",
+        "keywords": ["策略信号", "运行策略", "信号", "策略"],
+        "steps": [
+            "进入策略中心，确认交易对、周期和策略模板。",
+            "运行策略后查看每个策略的 action、confidence、reason 和冲突处理结果。",
+            "只把通过本地规则和风控的信号作为候选，不直接进入真实交易。",
+        ],
+        "check_points": ["策略启用状态", "参数", "信号方向", "置信度", "冲突结果", "风控状态"],
+        "common_failures": ["K 线不足", "策略参数不合理", "多个策略方向冲突", "置信度过低"],
+        "safety_notice": "策略信号只是候选，需要风控审批和人工确认。",
+    },
+    {
+        "id": "strategy_backtest",
+        "module": "strategy",
+        "title": "跑一次策略回测",
+        "goal": "验证策略在历史 K 线上的收益、回撤和稳定性",
+        "keywords": ["回测", "策略回测", "backtest", "跑一次", "历史表现"],
+        "steps": [
+            "进入策略中心或回测中心，选择交易对、周期、K 线数量和策略模板。",
+            "确认初始资金、手续费、滑点和仓位参数后，手动点击运行回测。",
+            "重点查看总收益、最大回撤、胜率、交易次数和权益曲线，而不是只看收益。",
+            "如果结果异常，调整参数后再跑一次，并和原结果对比稳定性。",
+        ],
+        "check_points": ["样本长度", "手续费", "滑点", "最大回撤", "收益曲线", "交易次数", "参数稳定性"],
+        "common_failures": ["K 线不足", "参数过拟合", "只在单一周期有效", "收益高但回撤不可接受"],
+        "safety_notice": "回测不代表未来收益，不能绕过模拟交易和风控验证。",
+    },
+    {
+        "id": "portfolio_risk_review",
+        "module": "portfolio",
+        "title": "查看组合风险",
+        "goal": "判断模拟组合是否过度集中或进入明显回撤",
+        "keywords": ["组合", "投资组合", "风险", "资金曲线", "回撤"],
+        "steps": [
+            "进入投资组合页面，选择观察时间范围。",
+            "查看权益曲线、回撤、持仓分布和收益归因。",
+            "如果某个币种或策略贡献过度集中，回到风控中心检查仓位限制。",
+        ],
+        "check_points": ["权益曲线", "最大回撤", "持仓集中度", "收益来源", "近期亏损次数"],
+        "common_failures": ["样本太短", "持仓过度集中", "单个策略贡献异常", "缓存数据未刷新"],
+        "safety_notice": "组合复盘只用于降低风险，不承诺收益最大化。",
+    },
+    {
+        "id": "account_check",
+        "module": "account",
+        "title": "检查模拟账户",
+        "goal": "确认 USDT 现金、持仓、订单和资金曲线是否一致",
+        "keywords": ["账户", "现金", "持仓", "资金", "余额"],
+        "steps": [
+            "进入账户状态页面，查看 USDT 现金、可用资金和总权益。",
+            "检查持仓列表的数量、成本、浮动盈亏和市值。",
+            "对照最近订单和模拟日志，确认账户变化来源。",
+        ],
+        "check_points": ["现金", "可用资金", "总权益", "持仓数量", "最近成交", "模拟日志"],
+        "common_failures": ["缓存未刷新", "部分成交导致数量不一致", "撤单后状态未同步"],
+        "safety_notice": "账户页展示的是模拟账户，不代表真实资产。",
+    },
+    {
+        "id": "risk_block_explanation",
+        "module": "risk",
+        "title": "查看风控阻断原因",
+        "goal": "理解某条信号或订单为什么被本地风控拒绝",
+        "keywords": ["风控", "阻断", "拒绝", "审批", "限制", "kill switch"],
+        "steps": [
+            "进入风控中心，先确认真实交易关闭、禁止做空和禁止杠杆仍然生效。",
+            "查看最大单笔金额、最大持仓、总仓位、冷却期和 Kill Switch 状态。",
+            "对照自动交易决策或 AI 建议的金额、方向、持仓和置信度，定位被拒原因。",
+            "需要调整时只在系统设置或自动交易配置里手动修改，AI 不能替你改配置。",
+        ],
+        "check_points": ["真实交易关闭", "最大单笔金额", "最大持仓", "现金余额", "持仓数量", "冷却期", "Kill Switch"],
+        "common_failures": ["超过单笔上限", "超过持仓上限", "卖出超过持仓", "连续亏损触发冷却", "真实交易安全门关闭"],
+        "safety_notice": "风控阻断优先级高于 AI 和策略建议，不能绕过。",
+    },
+    {
+        "id": "audit_order_review",
+        "module": "audit",
+        "title": "复盘订单审计日志",
+        "goal": "追踪 AI 建议、风控审批、订单提交和成交结果",
+        "keywords": ["审计", "日志", "复盘", "订单生命周期", "拒单"],
+        "steps": [
+            "进入审计日志页面，按时间查看 AI 建议、审批、订单和撤单事件。",
+            "找到目标订单或信号后，对照状态、原因和关联订单 ID。",
+            "如果状态异常，再进入诊断中心检查连接和数据刷新。",
+        ],
+        "check_points": ["signal_id", "order_id", "approval_status", "reject_reason", "created_at"],
+        "common_failures": ["日志被过滤", "信号没有生成订单", "风控拒单", "成交状态延迟刷新"],
+        "safety_notice": "审计用于复盘和追责，不会执行交易动作。",
+    },
+    {
+        "id": "diagnostics_health_check",
+        "module": "diagnostics",
+        "title": "排查系统诊断问题",
+        "goal": "定位行情、策略、缓存、自动循环或 AI 配置异常",
+        "keywords": ["诊断", "异常", "不健康", "连接", "刷新", "不可用"],
+        "steps": [
+            "进入诊断中心，先看连接、行情、策略、缓存和 AI 的健康状态。",
+            "根据异常模块跳转到对应页面复核，例如行情页、策略中心或系统设置。",
+            "如果 AI 不可用，检查模型配置和环境变量是否存在。",
+        ],
+        "check_points": ["WebSocket", "行情源", "缓存新鲜度", "策略状态", "AI provider", "错误日志"],
+        "common_failures": ["网络不可用", "交易所行情源限流", "API Key 缺失", "本地缓存过期"],
+        "safety_notice": "诊断过程只读，不要用 AI 指令开启真实交易。",
+    },
+    {
+        "id": "settings_safety_check",
+        "module": "settings",
+        "title": "检查 AI 模型和真实交易安全配置",
+        "goal": "确认 Flash/Pro 模型、上下文开关和真实交易关闭状态",
+        "keywords": ["设置", "模型", "Flash", "Pro", "真实交易", "安全配置"],
+        "steps": [
+            "进入系统设置页面，确认 AI provider、模型模式和环境变量状态。",
+            "检查真实交易状态必须保持关闭，模拟交易仍由用户手动确认。",
+            "需要切换模型时，在 AI 抽屉右下角选择 Flash 或 Pro 后再发送问题。",
+        ],
+        "check_points": ["AI provider", "模型", "API Key 状态", "真实交易关闭", "模拟盘模式"],
+        "common_failures": ["API Key 未设置", "模型名不匹配", "配置示例与运行配置不一致", "误以为 AI 能自动下单"],
+        "safety_notice": "AI 不能打开真实交易，也不能修改配置文件。",
+    },
+]
+
+
 class ProjectAssistantContextBuilder:
     """Build safe project-copilot context for AI chat."""
 
@@ -221,11 +431,21 @@ class ProjectAssistantContextBuilder:
         current_module: str | None = None,
         current_view_title: str | None = None,
         visible_context: dict[str, Any] | None = None,
+        guide_mode: bool = False,
+        user_goal: str | None = None,
     ) -> dict[str, Any]:
         context_mode = "project_and_market" if include_market_context else "project_only"
         active_module = ProjectAssistantContextBuilder.find_module(
             current_module=current_module,
             current_route=current_route,
+        )
+        active_guide = ProjectAssistantContextBuilder.select_operation_guide(
+            active_module=active_module,
+            current_route=current_route,
+            user_goal=user_goal,
+        )
+        operation_guides = ProjectAssistantContextBuilder.guides_for_module(
+            str((active_module or {}).get("id") or active_guide.get("module") or "")
         )
         route_questions = (
             ROUTE_SUGGESTED_QUESTIONS.get(str(active_module.get("id") or ""), [])
@@ -288,6 +508,11 @@ class ProjectAssistantContextBuilder:
                 "real_trading_allowed": False,
             },
             "active_module_guide": active_module or {},
+            "guide_mode": bool(guide_mode),
+            "operation_guides": operation_guides,
+            "active_operation_guide": active_guide if guide_mode else {},
+            "allowed_user_actions": ALLOWED_USER_ACTIONS,
+            "forbidden_ai_actions": FORBIDDEN_AI_ACTIONS,
             "route_suggested_questions": route_questions,
             "suggested_questions": route_questions
             if active_module
@@ -309,6 +534,53 @@ class ProjectAssistantContextBuilder:
             if module.get("id") == module_id:
                 return dict(module)
         return {}
+
+    @staticmethod
+    def guides_for_module(module_id: str) -> list[dict[str, Any]]:
+        module = str(module_id or "").strip()
+        guides = [dict(guide) for guide in OPERATION_GUIDES if guide.get("module") == module]
+        return guides or [dict(guide) for guide in OPERATION_GUIDES if guide.get("id") == "system_overview"]
+
+    @staticmethod
+    def select_operation_guide(
+        *,
+        active_module: dict[str, Any] | None = None,
+        current_route: str | None = None,
+        user_goal: str | None = None,
+    ) -> dict[str, Any]:
+        module_id = str((active_module or {}).get("id") or "").strip()
+        if not module_id and current_route:
+            module = ProjectAssistantContextBuilder.find_module(current_route=current_route)
+            module_id = str(module.get("id") or "").strip()
+        candidates = ProjectAssistantContextBuilder.guides_for_module(module_id)
+        all_guides = [dict(guide) for guide in OPERATION_GUIDES]
+        text = str(user_goal or "").strip().lower()
+
+        def score(guide: dict[str, Any]) -> int:
+            score_value = 0
+            if module_id and guide.get("module") == module_id:
+                score_value += 3
+            haystack = " ".join(
+                [
+                    str(guide.get("id") or ""),
+                    str(guide.get("title") or ""),
+                    str(guide.get("goal") or ""),
+                    " ".join(str(item) for item in guide.get("keywords", []) or []),
+                ]
+            ).lower()
+            if text:
+                for token in [part for part in text.replace("?", " ").replace("？", " ").split() if part]:
+                    if token in haystack:
+                        score_value += 2
+                for keyword in guide.get("keywords", []) or []:
+                    if str(keyword).lower() in text:
+                        score_value += 5
+            return score_value
+
+        best = max(all_guides, key=score) if all_guides else {}
+        if best and score(best) > 0:
+            return dict(best)
+        return dict(candidates[0]) if candidates else {}
 
     @staticmethod
     def sanitize_visible_context(value: Any, *, depth: int = 0) -> Any:

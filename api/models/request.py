@@ -107,6 +107,8 @@ class AiChatRequest(BaseModel):
     current_module: str | None = Field(default=None, max_length=64)
     current_view_title: str | None = Field(default=None, max_length=80)
     visible_context: dict[str, Any] = Field(default_factory=dict)
+    guide_mode: bool = False
+    user_goal: str | None = Field(default=None, max_length=300)
 
     @field_validator("symbol")
     @classmethod
@@ -124,7 +126,7 @@ class AiChatRequest(BaseModel):
             raise ValueError("message is required")
         return stripped
 
-    @field_validator("current_route", "current_module", "current_view_title")
+    @field_validator("current_route", "current_module", "current_view_title", "user_goal")
     @classmethod
     def strip_ai_chat_optional_text(cls, value: str | None) -> str | None:
         if value is None:
