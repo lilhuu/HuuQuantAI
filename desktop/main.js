@@ -119,7 +119,7 @@ async function waitForBackend(url, timeoutMs = 30000) {
       await new Promise((resolve) => setTimeout(resolve, 450));
     }
   }
-  throw new Error(`交易内核启动超时：${lastError ? lastError.message : "unknown error"}`);
+  throw new Error(`本地交易内核启动超时：${lastError ? lastError.message : "unknown error"}`);
 }
 
 function sendStatus(payload) {
@@ -181,7 +181,7 @@ async function startBackend() {
     if (!isQuitting) {
       sendStatus({
         type: "backend-exit",
-        message: "交易内核已退出，请重试启动。",
+        message: "本地交易内核已退出，请重试启动。",
         code,
         signal,
       });
@@ -196,7 +196,7 @@ async function startBackend() {
     });
   });
 
-  sendStatus({ type: "starting", message: "正在启动交易内核..." });
+  sendStatus({ type: "starting", message: "正在启动本地交易内核..." });
   await waitForBackend(backendUrl);
   appendDesktopLog(`Backend ready: ${backendUrl}`);
   return backendUrl;
@@ -228,8 +228,8 @@ function createWindow() {
     height: 860,
     minWidth: 760,
     minHeight: 640,
-    backgroundColor: "#061520",
-    title: "HUU Auto Trade Console",
+    backgroundColor: "#05070b",
+    title: "HuuQuantAI",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -260,7 +260,7 @@ async function bootDesktopApp() {
   try {
     createWindow();
     const url = await startBackend();
-    sendStatus({ type: "ready", message: "交易内核已就绪。", url });
+    sendStatus({ type: "ready", message: "本地交易内核已就绪", url });
     await mainWindow.loadURL(url);
   } catch (error) {
     appendDesktopLog(`Desktop boot failed: ${error.stack || error.message}`);
@@ -286,7 +286,7 @@ ipcMain.handle("open-logs", async () => {
   return { ok: true };
 });
 
-app.setName("HUU Auto Trade Console");
+app.setName("HuuQuantAI");
 app.setPath("userData", getUserDataDir());
 
 app.whenReady().then(bootDesktopApp);

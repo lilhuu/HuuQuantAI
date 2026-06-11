@@ -3,101 +3,210 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>HUU Auto Trade Console 启动中</title>
+    <title>HuuQuantAI 启动中</title>
     <style>
       :root {
         color-scheme: dark;
-        --bg: #061520;
-        --panel: #0c2133;
-        --line: rgba(120, 220, 255, 0.22);
-        --text: #ecfbff;
-        --muted: #8fb5c7;
-        --accent: #24d4d9;
+        --bg: #05070b;
+        --panel: rgba(9, 16, 28, 0.94);
+        --panel-soft: rgba(15, 26, 42, 0.72);
+        --line: rgba(143, 165, 196, 0.2);
+        --line-strong: rgba(21, 219, 219, 0.38);
+        --text: #f4f7fb;
+        --muted: #8fa0b8;
+        --accent: #15dbdb;
+        --green: #42e89e;
         --danger: #ff6b6b;
+        font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
       }
 
       * {
         box-sizing: border-box;
       }
 
+      html,
       body {
         margin: 0;
-        min-height: 100vh;
-        display: grid;
-        place-items: center;
-        font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
-        color: var(--text);
-        background:
-          radial-gradient(circle at 20% 20%, rgba(36, 212, 217, 0.18), transparent 34%),
-          radial-gradient(circle at 78% 12%, rgba(255, 198, 92, 0.13), transparent 30%),
-          var(--bg);
+        min-height: 100%;
       }
 
-      .card {
-        width: min(620px, calc(100vw - 48px));
-        padding: 42px;
-        border: 1px solid var(--line);
-        border-radius: 28px;
-        background: linear-gradient(145deg, rgba(12, 33, 51, 0.94), rgba(5, 17, 28, 0.92));
-        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.35);
+      body {
+        min-height: 100vh;
+        color: var(--text);
+        background:
+          linear-gradient(rgba(143, 165, 196, 0.045) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(143, 165, 196, 0.045) 1px, transparent 1px),
+          linear-gradient(135deg, #05070b 0%, #06111b 52%, #05070b 100%);
+        background-size: 42px 42px, 42px 42px, auto;
+        overflow: hidden;
+      }
+
+      .shell {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: minmax(340px, 0.95fr) minmax(440px, 0.85fr);
+        gap: 48px;
+        align-items: center;
+        padding: clamp(36px, 5vw, 84px);
+      }
+
+      .brand {
+        max-width: 760px;
+      }
+
+      .mark {
+        display: inline-grid;
+        place-items: center;
+        width: 48px;
+        height: 48px;
+        margin-bottom: 30px;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background: rgba(21, 219, 219, 0.1);
+        color: var(--accent);
+        font-weight: 900;
+        letter-spacing: 0;
       }
 
       .kicker {
         margin: 0 0 14px;
         color: var(--accent);
-        font-weight: 800;
-        letter-spacing: 0.12em;
+        font-size: 14px;
+        font-weight: 900;
+        letter-spacing: 0.16em;
         text-transform: uppercase;
       }
 
       h1 {
-        margin: 0 0 12px;
-        font-size: 34px;
+        max-width: 720px;
+        margin: 0;
+        font-size: clamp(42px, 5vw, 76px);
+        line-height: 1.02;
+        letter-spacing: 0;
       }
 
-      p {
+      .copy {
+        max-width: 610px;
+        margin: 22px 0 0;
+        color: var(--muted);
+        font-size: clamp(16px, 1.45vw, 21px);
+        line-height: 1.8;
+      }
+
+      .signal-line {
+        width: min(620px, 100%);
+        height: 130px;
+        margin-top: 42px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.025);
+      }
+
+      .panel {
+        position: relative;
+        width: min(560px, 100%);
+        justify-self: center;
+        padding: 34px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        box-shadow: 0 36px 90px rgba(0, 0, 0, 0.42);
+      }
+
+      .panel::before {
+        content: "";
+        position: absolute;
+        inset: 0 0 auto;
+        height: 3px;
+        background: linear-gradient(90deg, var(--accent), transparent 72%);
+      }
+
+      .panel-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+        align-items: flex-start;
+      }
+
+      .panel h2 {
         margin: 0;
+        font-size: 30px;
+        letter-spacing: 0;
+      }
+
+      .panel p {
+        margin: 10px 0 0;
         color: var(--muted);
         line-height: 1.7;
       }
 
-      .status {
-        margin-top: 28px;
-        padding: 18px 20px;
-        border-radius: 18px;
-        border: 1px solid var(--line);
-        background: rgba(255, 255, 255, 0.04);
-      }
-
       .loader {
-        width: 48px;
-        height: 48px;
-        margin-top: 30px;
-        border: 4px solid rgba(255, 255, 255, 0.1);
+        width: 38px;
+        height: 38px;
+        border: 3px solid rgba(255, 255, 255, 0.1);
         border-top-color: var(--accent);
+        border-right-color: rgba(66, 232, 158, 0.9);
         border-radius: 50%;
         animation: spin 0.9s linear infinite;
+      }
+
+      .status-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 28px;
+      }
+
+      .status-cell {
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel-soft);
+      }
+
+      .status-cell span {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .status-cell strong {
+        display: block;
+        margin-top: 7px;
+        color: var(--text);
+        font-size: 15px;
+      }
+
+      .status {
+        margin-top: 22px;
+        padding: 16px 18px;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background: rgba(21, 219, 219, 0.08);
+        color: var(--text);
+        font-weight: 800;
       }
 
       .actions {
         display: none;
         gap: 12px;
-        margin-top: 28px;
+        margin-top: 22px;
       }
 
       button {
+        min-height: 44px;
         border: 0;
-        border-radius: 999px;
-        padding: 13px 18px;
+        border-radius: 8px;
+        padding: 0 18px;
         cursor: pointer;
-        font-weight: 800;
-        color: #04151d;
+        font-weight: 900;
+        color: #031115;
         background: var(--accent);
       }
 
       button.secondary {
         color: var(--text);
-        background: rgba(255, 255, 255, 0.1);
+        background: rgba(255, 255, 255, 0.08);
         border: 1px solid var(--line);
       }
 
@@ -111,7 +220,8 @@
 
       .failed .status {
         color: var(--danger);
-        border-color: rgba(255, 107, 107, 0.35);
+        border-color: rgba(255, 107, 107, 0.45);
+        background: rgba(255, 107, 107, 0.1);
       }
 
       @keyframes spin {
@@ -119,19 +229,80 @@
           transform: rotate(360deg);
         }
       }
+
+      @media (max-width: 980px) {
+        body {
+          overflow: auto;
+        }
+
+        .shell {
+          grid-template-columns: 1fr;
+          gap: 28px;
+          padding: 28px;
+        }
+
+        .panel {
+          justify-self: stretch;
+        }
+      }
+
+      @media (max-width: 560px) {
+        .status-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .panel {
+          padding: 24px;
+        }
+      }
     </style>
   </head>
   <body>
-    <main class="card" id="card">
-      <p class="kicker">HUU Auto Trade Console</p>
-      <h1>正在启动交易内核</h1>
-      <p>桌面窗口已就绪，正在启动本地 FastAPI 服务并加载交易工作台。</p>
-      <div class="loader"></div>
-      <div class="status" id="status">正在准备运行环境...</div>
-      <div class="actions">
-        <button id="retry">重试启动</button>
-        <button class="secondary" id="logs">打开日志目录</button>
-      </div>
+    <main class="shell">
+      <section class="brand">
+        <div class="mark">HQ</div>
+        <p class="kicker">HuuQuantAI</p>
+        <h1>本地量化交易工作台正在就绪</h1>
+        <p class="copy">
+          正在启动本地交易内核、加载 FastAPI 服务和加密货币工作台。真实交易默认关闭，系统将优先进入模拟环境。
+        </p>
+        <svg class="signal-line" viewBox="0 0 620 130" role="img" aria-label="启动行情线">
+          <path d="M0 86 L58 86 L92 70 L136 78 L180 45 L226 56 L270 38 L314 64 L356 54 L398 26 L440 48 L482 42 L526 18 L620 28" fill="none" stroke="rgba(21,219,219,0.95)" stroke-width="3" />
+          <path d="M0 104 L72 98 L128 102 L188 88 L244 92 L310 76 L370 82 L426 64 L496 70 L560 52 L620 58" fill="none" stroke="rgba(66,232,158,0.72)" stroke-width="2" />
+        </svg>
+      </section>
+
+      <section class="panel" id="card">
+        <div class="panel-head">
+          <div>
+            <p class="kicker">本地量化交易工作台</p>
+            <h2>正在启动本地交易内核</h2>
+            <p>桌面窗口已就绪，正在连接本地 FastAPI 服务并加载 HuuQuantAI。</p>
+          </div>
+          <div class="loader" aria-hidden="true"></div>
+        </div>
+
+        <div class="status-grid">
+          <div class="status-cell">
+            <span>行情源</span>
+            <strong>Binance 公共行情</strong>
+          </div>
+          <div class="status-cell">
+            <span>交易模式</span>
+            <strong>本地模拟交易</strong>
+          </div>
+          <div class="status-cell">
+            <span>真实交易</span>
+            <strong>默认关闭</strong>
+          </div>
+        </div>
+
+        <div class="status" id="status">正在准备运行环境...</div>
+        <div class="actions">
+          <button id="retry">重试启动</button>
+          <button class="secondary" id="logs">打开日志目录</button>
+        </div>
+      </section>
     </main>
 
     <script>
@@ -141,15 +312,16 @@
       const logsButton = document.getElementById("logs");
 
       window.desktopApi?.onStatus((payload) => {
-        statusEl.textContent = payload?.message || "正在启动...";
+        statusEl.textContent = payload?.message || "正在启动本地交易内核...";
         if (payload?.type === "failed" || payload?.type === "backend-error" || payload?.type === "backend-exit") {
           card.classList.add("failed");
+          statusEl.textContent = payload?.message || "启动失败，请查看日志。";
         }
       });
 
       retryButton.addEventListener("click", async () => {
         card.classList.remove("failed");
-        statusEl.textContent = "正在重试启动交易内核...";
+        statusEl.textContent = "正在重试启动本地交易内核...";
         try {
           await window.desktopApi.retryBackend();
         } catch (error) {
