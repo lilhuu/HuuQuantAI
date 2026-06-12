@@ -56,6 +56,7 @@ const formMessage = ref("");
 const strategyLoading = ref(false);
 const selectedPortfolioGroup = ref("symbol");
 let initialRefreshTimer = null;
+let disposed = false;
 
 const periods = ["1m", "5m", "15m", "1h", "4h", "1d"];
 const watchSymbols = ["BTC/USDT", "ETH/USDT", "DOGE/USDT", "SOL/USDT", "BNB/USDT"];
@@ -520,15 +521,22 @@ async function hydrateFeature() {
 }
 
 onMounted(() => {
+  disposed = false;
   initialRefreshTimer = window.setTimeout(() => {
     initialRefreshTimer = null;
+    if (disposed) {
+      return;
+    }
     hydrateFeature().catch((error) => {
-      systemStore.setError(error, "刷新工作台数据失败");
+      if (!disposed) {
+        systemStore.setError(error, "刷新工作台数据失败");
+      }
     });
-  }, 0);
+  }, 180);
 });
 
 onBeforeUnmount(() => {
+  disposed = true;
   if (initialRefreshTimer) {
     window.clearTimeout(initialRefreshTimer);
     initialRefreshTimer = null;

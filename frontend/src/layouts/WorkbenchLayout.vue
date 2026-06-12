@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onErrorCaptured, onMounted, watch } from "vue";
+import { computed, onBeforeUnmount, onErrorCaptured, onMounted, ref, watch } from "vue";
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 
 import AiChatDrawer from "../components/AiChatDrawer.vue";
@@ -15,6 +15,7 @@ const authStore = useAuthStore();
 const marketStore = useMarketStore();
 const route = useRoute();
 const router = useRouter();
+const optimisticRoutePath = ref(route.path);
 const { errorInfo: toastErrorInfo, setError: setToastError, clearError: clearToastError } = useToast();
 const { initializeWorkbench, teardownWorkbench } = useBoot();
 const {
@@ -102,13 +103,33 @@ watch(
   },
 );
 
+watch(
+  () => route.path,
+  (nextPath) => {
+    optimisticRoutePath.value = nextPath;
+  },
+  { immediate: true },
+);
+
 function clearVisibleError() {
   clearToastError();
   clearWorkspaceError();
 }
 
 function isActiveNavItem(item) {
-  return route.path === item.to || (item.to !== "/" && route.path.startsWith(`${item.to}/`));
+  const activePath = optimisticRoutePath.value || route.path;
+  return activePath === item.to || (item.to !== "/" && activePath.startsWith(`${item.to}/`));
+}
+
+function navigateSidebar(item) {
+  if (!item?.to || item.to === route.path) {
+    optimisticRoutePath.value = route.path;
+    return;
+  }
+  optimisticRoutePath.value = item.to;
+  router.push(item.to).catch(() => {
+    optimisticRoutePath.value = route.path;
+  });
 }
 
 function formatTopPrice(value) {
@@ -144,11 +165,18 @@ function formatTopVolume(value) {
           v-for="item in navItems"
           :key="`${item.label}-${item.to}`"
           :to="item.to"
-          class="cq-nav__item"
-          :class="{ active: isActiveNavItem(item) }"
+          custom
+          v-slot="{ href }"
         >
-          <span class="cq-icon" :data-icon="item.icon" aria-hidden="true"></span>
-          <span>{{ item.label }}</span>
+          <a
+            :href="href"
+            class="cq-nav__item"
+            :class="{ active: isActiveNavItem(item) }"
+            @click.prevent="navigateSidebar(item)"
+          >
+            <span class="cq-icon" :data-icon="item.icon" aria-hidden="true"></span>
+            <span>{{ item.label }}</span>
+          </a>
         </RouterLink>
       </nav>
 

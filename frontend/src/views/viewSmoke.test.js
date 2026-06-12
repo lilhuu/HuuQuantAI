@@ -416,4 +416,37 @@ describe("view smoke tests", () => {
     wrapper.unmount();
     vi.useRealTimers();
   });
+
+  it("cancels delayed feature refresh when navigating away quickly", async () => {
+    vi.useFakeTimers();
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const marketStore = useMarketStore();
+    const systemStore = useSystemStore();
+    const autoStore = useAutoTradingStore();
+    const aiStore = useAiAdvisorStore();
+
+    const fetchQuotes = vi.spyOn(marketStore, "fetchCryptoQuotes").mockResolvedValue({});
+    const fetchKlines = vi.spyOn(marketStore, "fetchCryptoKlines").mockResolvedValue({});
+    const fetchOrderBook = vi.spyOn(marketStore, "fetchCryptoOrderBook").mockResolvedValue({});
+    const refreshOverview = vi.spyOn(systemStore, "refreshOverview").mockResolvedValue(undefined);
+    const fetchStatus = vi.spyOn(autoStore, "fetchStatus").mockResolvedValue({});
+    const fetchSignals = vi.spyOn(aiStore, "fetchSignals").mockResolvedValue({});
+
+    const wrapper = shallowMount(FeatureCommandView, {
+      props: { feature: "dashboard" },
+      global: { plugins: [pinia], stubs: { CryptoKlineChart: true, BacktestChart: true } },
+    });
+
+    wrapper.unmount();
+    await vi.runOnlyPendingTimersAsync();
+
+    expect(fetchQuotes).not.toHaveBeenCalled();
+    expect(fetchKlines).not.toHaveBeenCalled();
+    expect(fetchOrderBook).not.toHaveBeenCalled();
+    expect(refreshOverview).not.toHaveBeenCalled();
+    expect(fetchStatus).not.toHaveBeenCalled();
+    expect(fetchSignals).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
 });
