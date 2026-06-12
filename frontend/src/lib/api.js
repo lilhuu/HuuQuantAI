@@ -64,8 +64,13 @@ export function extractApiError(error) {
 export function classifyApiError(error) {
   const axiosError = /** @type {{ response?: { status?: number, data?: ApiErrorPayload }, code?: string, message?: string }} */ (error || {});
   const status = axiosError.response?.status;
-  const data = axiosError.response?.data || {};
-  const detail = data.detail;
+  const rawData = axiosError.response?.data || {};
+  const detailObject = typeof rawData.detail === "object" && rawData.detail !== null ? rawData.detail : {};
+  const data = {
+    ...rawData,
+    ...detailObject,
+  };
+  const detail = typeof rawData.detail === "string" ? rawData.detail : data.details;
   const message = data.message;
   const errorCode = data.error_code || data.business_code || "";
   const base = {
@@ -150,7 +155,7 @@ export function classifyApiError(error) {
     return {
       type: "network",
       title: "请求超时",
-      message: "后台响应超时，请检查交易内核是否正常运行。",
+      message: "后台响应超时。策略验证或回测计算可能较慢，请减少交易对、降低 K 线数量，或稍后重试。",
       status: null,
       errorCode: null,
     };
@@ -166,20 +171,20 @@ export function classifyApiError(error) {
     };
   }
 
-  if (axiosError.response.data?.detail) {
+  if (detail) {
     return {
       ...base,
       type: "unknown",
       title: "请求失败",
-      message: String(axiosError.response.data.detail),
+      message: String(detail),
     };
   }
-  if (axiosError.response.data?.message) {
+  if (message) {
     return {
       ...base,
       type: "unknown",
       title: "请求失败",
-      message: axiosError.response.data.message,
+      message,
     };
   }
   return {

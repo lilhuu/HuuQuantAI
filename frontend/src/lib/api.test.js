@@ -27,7 +27,11 @@ describe("classifyApiError", () => {
       type: "server",
       message: "down",
     });
-    expect(classifyApiError({ code: "ECONNABORTED" })).toMatchObject({ type: "network", title: "请求超时" });
+    expect(classifyApiError({ code: "ECONNABORTED" })).toMatchObject({
+      type: "network",
+      title: "请求超时",
+      message: expect.stringContaining("减少交易对"),
+    });
     expect(extractApiError(new Error("offline"))).toBe("offline");
   });
 });

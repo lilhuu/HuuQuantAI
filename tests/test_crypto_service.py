@@ -212,6 +212,62 @@ def test_get_klines_and_orderbook_success_fallback_errors(tmp_path):
         asyncio.run(service.get_orderbook(""))
 
 
+def test_strategy_market_data_loads_symbols_concurrently(tmp_path):
+    service = _service(tmp_path)
+    started = []
+    first_resume_counts = []
+
+    async def fake_get_klines(symbol, period, limit):
+        started.append(symbol)
+        if symbol == "BTC/USDT":
+            await asyncio.sleep(0.02)
+            first_resume_counts.append(len(started))
+        return CryptoKLinesResponse(
+            symbol=symbol,
+            period=period,
+            items=[CryptoKLineResponse(**_kline(symbol=symbol))],
+            count=1,
+            source="unit",
+        )
+
+    service.get_klines = fake_get_klines
+
+    result = asyncio.run(service._load_strategy_market_data(["BTC/USDT", "ETH/USDT"], "1h", 30))
+
+    assert first_resume_counts == [2]
+    assert set(result) == {"BTC/USDT", "ETH/USDT"}
+
+
+def test_strategy_market_data_keeps_successful_symbols_and_fails_clearly_when_all_fail(tmp_path):
+    service = _service(tmp_path)
+
+    async def partially_failing_get_klines(symbol, period, limit):
+        if symbol == "ETH/USDT":
+            raise RuntimeError("eth unavailable")
+        return CryptoKLinesResponse(
+            symbol=symbol,
+            period=period,
+            items=[CryptoKLineResponse(**_kline(symbol=symbol))],
+            count=1,
+            source="unit",
+        )
+
+    service.get_klines = partially_failing_get_klines
+    partial = asyncio.run(service._load_strategy_market_data(["BTC/USDT", "ETH/USDT"], "1h", 30))
+    assert set(partial) == {"BTC/USDT"}
+
+    async def fully_failing_get_klines(symbol, period, limit):
+        raise RuntimeError(f"{symbol} unavailable")
+
+    service.get_klines = fully_failing_get_klines
+    with pytest.raises(ApiError) as exc:
+        asyncio.run(service._load_strategy_market_data(["BTC/USDT", "ETH/USDT"], "1h", 30))
+
+    assert exc.value.status_code == 503
+    assert exc.value.detail["error_code"] == ErrorCode.STRATEGY_CONFIG_INVALID
+    assert "market data" in exc.value.detail["message"].lower()
+
+
 def test_paper_order_account_positions_logs_and_auto_controls(tmp_path):
     service = _service(tmp_path, {"crypto": {"paper": {"partial_fill_enabled": False, "max_position_ratio": 1.0}}, "storage": {"db_path": str(tmp_path / "paper.db")}})
     buy = asyncio.run(service.place_paper_order(CryptoPaperOrderRequest(symbol="BTC/USDT", action="BUY", quantity=0.01, price=50000)))

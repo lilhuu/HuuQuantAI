@@ -72,12 +72,17 @@ onErrorCaptured((error, _instance, info) => {
   return false;
 });
 
-onMounted(async () => {
+onMounted(() => {
   window.addEventListener("pointerdown", handleUserInteraction, { passive: true });
-  await authStore.ensureInitialized();
-  if (authStore.isAuthenticated) {
-    await initializeWorkbench();
-  }
+  authStore
+    .ensureInitialized()
+    .then(() => {
+      if (authStore.isAuthenticated) {
+        return initializeWorkbench();
+      }
+      return null;
+    })
+    .catch((error) => setToastError(error, "初始化 HuuQuantAI 工作台失败"));
 });
 
 onBeforeUnmount(() => {
@@ -87,9 +92,9 @@ onBeforeUnmount(() => {
 
 watch(
   () => authStore.isAuthenticated,
-  async (nextValue, previousValue) => {
+  (nextValue, previousValue) => {
     if (nextValue && !previousValue) {
-      await initializeWorkbench();
+      initializeWorkbench().catch((error) => setToastError(error, "初始化 HuuQuantAI 工作台失败"));
     }
     if (!nextValue && previousValue) {
       teardownWorkbench({ reset: true });

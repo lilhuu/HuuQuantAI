@@ -7,6 +7,10 @@ import { createPinia, setActivePinia } from "pinia";
 import { apiClient } from "../lib/api";
 import AiChatDrawer from "../components/AiChatDrawer.vue";
 import FeatureCommandView from "../components/FeatureCommandView.vue";
+import { useAiAdvisorStore } from "../stores/aiAdvisor";
+import { useAutoTradingStore } from "../stores/autoTrading";
+import { useMarketStore } from "../stores/market";
+import { useSystemStore } from "../stores/system";
 import { useAiChatStore } from "../stores/aiChat";
 
 const routeState = vi.hoisted(() => ({
@@ -130,6 +134,15 @@ describe("view smoke tests", () => {
 
     expect(wrapper.findComponent(FeatureCommandView).props("feature")).toBe("settings");
     expect(wrapper.findComponent({ name: "AccountView" }).exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("renders BacktestView as an independent backtest center", async () => {
+    const component = (await viewModules.BacktestView()).default;
+    const wrapper = shallowMount(component, { global: { plugins: [createPinia()] } });
+
+    expect(wrapper.findComponent(FeatureCommandView).props("feature")).toBe("backtest");
+    expect(wrapper.findComponent({ name: "StrategyView" }).exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -260,5 +273,100 @@ describe("view smoke tests", () => {
     expect(strategy.find('[data-feature-role="strategy-lab"]').exists()).toBe(true);
     expect(strategy.find('[data-feature-role="market-intelligence"]').exists()).toBe(false);
     strategy.unmount();
+
+    const backtest = shallowMount(FeatureCommandView, {
+      props: { feature: "backtest" },
+      global: { plugins: [pinia], stubs: { CryptoKlineChart: true, BacktestChart: true } },
+    });
+    expect(backtest.find('[data-feature-role="backtest-center"]').exists()).toBe(true);
+    expect(backtest.find('[data-feature-role="strategy-lab"]').exists()).toBe(false);
+    backtest.unmount();
+  });
+
+  it("does not run a backtest on mount and uses a longer timeout when requested", async () => {
+    vi.useFakeTimers();
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const post = vi.spyOn(apiClient, "post").mockResolvedValue({ data: { items: [] } });
+
+    const wrapper = shallowMount(FeatureCommandView, {
+      props: { feature: "backtest" },
+      global: { plugins: [pinia], stubs: { CryptoKlineChart: true, BacktestChart: true } },
+    });
+
+    await vi.runOnlyPendingTimersAsync();
+    expect(post).not.toHaveBeenCalledWith("/crypto/strategies/backtest", expect.anything(), expect.anything());
+
+    await wrapper.find('[data-action="run-backtest"]').trigger("click");
+    expect(post).toHaveBeenCalledWith(
+      "/crypto/strategies/backtest",
+      expect.objectContaining({ initial_cash: 10000 }),
+      expect.objectContaining({ timeout: 90000 }),
+    );
+
+    wrapper.unmount();
+    vi.useRealTimers();
+  });
+
+  it("uses a longer timeout for manual strategy runs", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const post = vi.spyOn(apiClient, "post").mockResolvedValue({ data: { summary: [], strategy_results: [] } });
+
+    const wrapper = shallowMount(FeatureCommandView, {
+      props: { feature: "strategy" },
+      global: { plugins: [pinia], stubs: { CryptoKlineChart: true, BacktestChart: true } },
+    });
+
+    await wrapper.find('[data-action="run-strategy"]').trigger("click");
+    expect(post).toHaveBeenCalledWith(
+      "/crypto/strategies/run",
+      expect.anything(),
+      expect.objectContaining({ timeout: 45000 }),
+    );
+
+    wrapper.unmount();
+  });
+
+  it("defers feature data refresh until after the first render", async () => {
+    vi.useFakeTimers();
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const marketStore = useMarketStore();
+    const systemStore = useSystemStore();
+    const autoStore = useAutoTradingStore();
+    const aiStore = useAiAdvisorStore();
+
+    const fetchQuotes = vi.spyOn(marketStore, "fetchCryptoQuotes").mockResolvedValue({});
+    const fetchKlines = vi.spyOn(marketStore, "fetchCryptoKlines").mockResolvedValue({});
+    const fetchOrderBook = vi.spyOn(marketStore, "fetchCryptoOrderBook").mockResolvedValue({});
+    const refreshOverview = vi.spyOn(systemStore, "refreshOverview").mockResolvedValue(undefined);
+    const fetchStatus = vi.spyOn(autoStore, "fetchStatus").mockResolvedValue({});
+    const fetchSignals = vi.spyOn(aiStore, "fetchSignals").mockResolvedValue({});
+
+    const wrapper = shallowMount(FeatureCommandView, {
+      props: { feature: "dashboard" },
+      global: { plugins: [pinia], stubs: { CryptoKlineChart: true, BacktestChart: true } },
+    });
+
+    expect(wrapper.exists()).toBe(true);
+    expect(fetchQuotes).not.toHaveBeenCalled();
+    expect(fetchKlines).not.toHaveBeenCalled();
+    expect(fetchOrderBook).not.toHaveBeenCalled();
+    expect(refreshOverview).not.toHaveBeenCalled();
+    expect(fetchStatus).not.toHaveBeenCalled();
+    expect(fetchSignals).not.toHaveBeenCalled();
+
+    await vi.runOnlyPendingTimersAsync();
+
+    expect(fetchQuotes).toHaveBeenCalledTimes(1);
+    expect(fetchKlines).toHaveBeenCalledTimes(1);
+    expect(fetchOrderBook).toHaveBeenCalledTimes(1);
+    expect(refreshOverview).toHaveBeenCalledTimes(1);
+    expect(fetchStatus).toHaveBeenCalledTimes(1);
+    expect(fetchSignals).toHaveBeenCalledTimes(1);
+
+    wrapper.unmount();
+    vi.useRealTimers();
   });
 });

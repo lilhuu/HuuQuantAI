@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 
 import BacktestChart from "./BacktestChart.vue";
@@ -55,9 +55,12 @@ const strategyBacktests = ref([]);
 const formMessage = ref("");
 const strategyLoading = ref(false);
 const selectedPortfolioGroup = ref("symbol");
+let initialRefreshTimer = null;
 
 const periods = ["1m", "5m", "15m", "1h", "4h", "1d"];
 const watchSymbols = ["BTC/USDT", "ETH/USDT", "DOGE/USDT", "SOL/USDT", "BNB/USDT"];
+const STRATEGY_RUN_TIMEOUT_MS = 45000;
+const STRATEGY_BACKTEST_TIMEOUT_MS = 90000;
 
 const FEATURE_META = {
   dashboard: {
@@ -99,6 +102,14 @@ const FEATURE_META = {
     intent: "策略研发",
     primary: "运行策略",
     prompt: "帮我比较当前策略组合的风险和优势",
+  },
+  backtest: {
+    eyebrow: "Backtest Center",
+    title: "回测中心",
+    subtitle: "用历史 K 线验证策略表现，重点查看收益曲线、最大回撤、胜率和盈亏比，不会触发任何真实下单。",
+    intent: "历史回测",
+    primary: "开始回测",
+    prompt: "帮我判断这次回测结果是否稳定，最大回撤和胜率是否可以接受",
   },
   portfolio: {
     eyebrow: "Portfolio Intelligence",
@@ -352,7 +363,9 @@ async function loadStrategyTemplates() {
 async function runStrategies() {
   strategyLoading.value = true;
   try {
-    const { data } = await apiClient.post("/crypto/strategies/run", strategyPayload());
+    const { data } = await apiClient.post("/crypto/strategies/run", strategyPayload(), {
+      timeout: STRATEGY_RUN_TIMEOUT_MS,
+    });
     strategySignals.value = data.summary || data.strategy_results || [];
   } catch (error) {
     systemStore.setError(error, "运行策略失败");
@@ -364,14 +377,20 @@ async function runStrategies() {
 async function backtestStrategies() {
   strategyLoading.value = true;
   try {
-    const { data } = await apiClient.post("/crypto/strategies/backtest", {
-      ...strategyPayload(),
-      initial_cash: Number(strategyForm.initialCash || 10000),
-      fee_rate: 0.001,
-      slippage_rate: 0.0005,
-      min_quantity: 0.000001,
-      position_sizing: "strategy_position_ratio",
-    });
+    const { data } = await apiClient.post(
+      "/crypto/strategies/backtest",
+      {
+        ...strategyPayload(),
+        initial_cash: Number(strategyForm.initialCash || 10000),
+        fee_rate: 0.001,
+        slippage_rate: 0.0005,
+        min_quantity: 0.000001,
+        position_sizing: "strategy_position_ratio",
+      },
+      {
+        timeout: STRATEGY_BACKTEST_TIMEOUT_MS,
+      },
+    );
     strategyBacktests.value = data.items || [];
   } catch (error) {
     systemStore.setError(error, "策略回测失败");
@@ -385,21 +404,61 @@ async function refreshFeature() {
   if (props.feature === "trade" || props.feature === "account") return systemStore.refreshOverview();
   if (props.feature === "auto") return runAutoScan();
   if (props.feature === "strategy") return runStrategies();
+  if (props.feature === "backtest") return backtestStrategies();
   if (props.feature === "portfolio") return portfolioStore.fetchAnalytics();
   if (props.feature === "settings") return Promise.allSettled([autoStore.fetchStatus(), systemStore.refreshOverview()]);
   return refreshAll();
 }
 
-onMounted(async () => {
-  await refreshAll();
-  if (props.feature === "strategy") {
-    await loadStrategyTemplates().catch(() => {});
+async function hydrateFeature() {
+  if (props.feature === "market") {
+    await loadMarket();
+  } else if (props.feature === "trade" || props.feature === "account" || props.feature === "risk" || props.feature === "audit") {
+    await Promise.allSettled([systemStore.refreshOverview(), autoStore.fetchStatus()]);
+  } else if (props.feature === "auto") {
+    await Promise.allSettled([
+      autoStore.fetchStatus(),
+      systemStore.refreshOverview(),
+      marketStore.fetchCryptoQuotes(marketStore.cryptoWatchSymbols?.length ? marketStore.cryptoWatchSymbols : watchSymbols),
+    ]);
+  } else if (props.feature === "strategy") {
+    await Promise.allSettled([
+      loadStrategyTemplates(),
+      autoStore.fetchStatus(),
+      marketStore.fetchCryptoQuotes(marketStore.cryptoWatchSymbols?.length ? marketStore.cryptoWatchSymbols : watchSymbols),
+    ]);
+  } else if (props.feature === "backtest") {
+    await Promise.allSettled([
+      loadStrategyTemplates(),
+      autoStore.fetchStatus(),
+      marketStore.fetchCryptoQuotes(marketStore.cryptoWatchSymbols?.length ? marketStore.cryptoWatchSymbols : watchSymbols),
+    ]);
+  } else if (props.feature === "portfolio") {
+    await Promise.allSettled([portfolioStore.fetchAnalytics(), systemStore.refreshOverview()]);
+  } else if (props.feature === "settings" || props.feature === "diagnostics") {
+    await Promise.allSettled([autoStore.fetchStatus(), systemStore.refreshOverview()]);
+  } else {
+    await refreshAll();
   }
-  if (props.feature === "portfolio") {
-    await portfolioStore.fetchAnalytics().catch(() => {});
-  }
+
   if (!orderForm.price && latestPrice.value) {
     orderForm.price = latestPrice.value;
+  }
+}
+
+onMounted(() => {
+  initialRefreshTimer = window.setTimeout(() => {
+    initialRefreshTimer = null;
+    hydrateFeature().catch((error) => {
+      systemStore.setError(error, "刷新工作台数据失败");
+    });
+  }, 0);
+});
+
+onBeforeUnmount(() => {
+  if (initialRefreshTimer) {
+    window.clearTimeout(initialRefreshTimer);
+    initialRefreshTimer = null;
   }
 });
 </script>
@@ -670,7 +729,7 @@ onMounted(async () => {
         </div>
         <div class="cq-button-row">
           <button class="cq-command-button" type="button" @click="loadStrategyTemplates">模板</button>
-          <button class="cq-command-button cq-command-button--primary" type="button" @click="runStrategies">运行策略</button>
+          <button class="cq-command-button cq-command-button--primary" type="button" data-action="run-strategy" @click="runStrategies">运行策略</button>
           <button class="cq-command-button" type="button" @click="backtestStrategies">回测</button>
         </div>
       </article>
@@ -701,6 +760,59 @@ onMounted(async () => {
               <tr v-if="!strategySignals.length && !strategyBacktests.length"><td colspan="5">暂无策略结果。</td></tr>
             </tbody>
           </table>
+        </div>
+      </article>
+    </div>
+
+    <div v-else-if="feature === 'backtest'" class="cq-distinct-grid cq-distinct-grid--backtest" data-feature-role="backtest-center">
+      <article class="cq-feature-panel">
+        <div class="cq-panel-headline"><div><span>回测参数</span><h2>历史表现验证</h2></div><b>{{ strategyLoading ? "运行中" : "就绪" }}</b></div>
+        <div class="cq-form-stack">
+          <label><span>交易对</span><input v-model="strategyForm.symbolsText" /></label>
+          <label><span>周期</span><select v-model="strategyForm.period"><option v-for="period in periods" :key="period">{{ period }}</option></select></label>
+          <label><span>K 线数量</span><input v-model.number="strategyForm.limit" type="number" /></label>
+          <label><span>初始资金 USDT</span><input v-model.number="strategyForm.initialCash" type="number" /></label>
+        </div>
+        <div class="cq-button-row">
+          <button class="cq-command-button" type="button" @click="loadStrategyTemplates">模板</button>
+          <button class="cq-command-button cq-command-button--primary" type="button" data-action="run-backtest" @click="backtestStrategies">开始回测</button>
+        </div>
+      </article>
+      <article class="cq-feature-panel cq-span-2">
+        <div class="cq-panel-headline"><div><span>回测曲线</span><h2>权益与回撤</h2></div><b>{{ strategyBacktests.length }} 组结果</b></div>
+        <BacktestChart
+          :equity-curve="strategyBacktests[0]?.equity_curve || []"
+          :drawdown-curve="strategyBacktests[0]?.drawdown_curve || []"
+          :height="300"
+        />
+      </article>
+      <article class="cq-feature-panel cq-span-3">
+        <div class="cq-panel-headline"><div><span>回测结果</span><h2>收益 / 回撤 / 胜率</h2></div></div>
+        <div class="cq-table-shell">
+          <table>
+            <thead><tr><th>策略</th><th>收益</th><th>最大回撤</th><th>胜率</th><th>盈亏比</th><th>交易数</th></tr></thead>
+            <tbody>
+              <tr v-for="(item, index) in strategyBacktests.slice(0, 12)" :key="`backtest-center-${index}`">
+                <td>{{ item.strategy_name || item.strategy_id || "-" }}</td>
+                <td>{{ formatPercent(item.total_return_percent || 0) }}</td>
+                <td>{{ formatPercent(item.max_drawdown_percent || 0) }}</td>
+                <td>{{ formatPercent(item.win_rate || 0) }}</td>
+                <td>{{ Number(item.profit_factor || 0).toFixed(2) }}</td>
+                <td>{{ item.trade_count || 0 }}</td>
+              </tr>
+              <tr v-if="!strategyBacktests.length"><td colspan="6">暂无回测结果，点击“开始回测”后生成。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+      <article class="cq-feature-panel cq-span-3">
+        <div class="cq-panel-headline"><div><span>模板库</span><h2>可回测策略</h2></div><b>{{ strategyTemplates.length || autoStore.configDraft.strategies.length }}</b></div>
+        <div class="cq-strategy-stack">
+          <div v-for="template in (strategyTemplates.length ? strategyTemplates : autoStore.configDraft.strategies)" :key="template.strategy_id || template.type">
+            <strong>{{ template.name || template.strategy_id || template.type }}</strong>
+            <span>{{ template.description || template.type || "策略模板" }}</span>
+            <em>仅模拟</em>
+          </div>
         </div>
       </article>
     </div>

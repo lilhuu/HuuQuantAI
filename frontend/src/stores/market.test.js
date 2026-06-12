@@ -37,4 +37,24 @@ describe("market store", () => {
     expect(store.cryptoWatchSymbols).toEqual(["ETH/USDT", "BTC/USDT"]);
     expect(store.cryptoQuotes.map((item) => item.symbol)).toEqual(["BTC/USDT", "ETH/USDT"]);
   });
+
+  it("reuses a fresh quote response for duplicate refreshes", async () => {
+    const get = vi.spyOn(apiClient, "get").mockResolvedValueOnce({
+      data: {
+        source: "binance",
+        items: [
+          { symbol: "ETH/USDT", price: 3000 },
+          { symbol: "BTC/USDT", price: 50000 },
+        ],
+      },
+    });
+    const store = useMarketStore();
+
+    const first = await store.fetchCryptoQuotes(["BTC/USDT", "ETH/USDT"]);
+    const second = await store.fetchCryptoQuotes(["btcusdt", "ethusdt"]);
+
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(second).toBe(first);
+    expect(store.cryptoQuotes.map((item) => item.symbol)).toEqual(["BTC/USDT", "ETH/USDT"]);
+  });
 });

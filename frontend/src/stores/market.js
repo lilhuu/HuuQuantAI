@@ -6,6 +6,8 @@ import { createReconnectingSocket } from "../lib/reconnectingSocket";
 import { createCryptoSocket } from "../lib/ws";
 import { normalizeCryptoSymbol } from "../lib/tradingUtils";
 
+const REQUEST_CACHE_MS = 3000;
+
 /**
  * @typedef {Object} CryptoQuote
  * @property {string} symbol
@@ -66,6 +68,21 @@ export const useMarketStore = defineStore("trading-market", () => {
   const quotePage = ref(1);
   const quotePageSize = ref(50);
   const quotesTotal = ref(0);
+  const quoteRequestCache = {
+    key: "",
+    completedAt: 0,
+    data: null,
+  };
+  const klineRequestCache = {
+    key: "",
+    completedAt: 0,
+    data: null,
+  };
+  const orderBookRequestCache = {
+    key: "",
+    completedAt: 0,
+    data: null,
+  };
 
   const marketSocket = createReconnectingSocket({
     createSocket: (options) => createCryptoSocket(options),
@@ -137,6 +154,12 @@ export const useMarketStore = defineStore("trading-market", () => {
     if (quote) params.quote = quote;
     if (limit != null) params.limit = limit;
     if (offset != null) params.offset = offset;
+    const requestKey = stableRequestKey(params);
+    const cachedQuoteData = readFreshRequestCache(quoteRequestCache, requestKey);
+    if (cachedQuoteData) {
+      return cachedQuoteData;
+    }
+    quoteRequestCache.key = requestKey;
 
     cryptoLoading.value = true;
     try {
@@ -145,6 +168,8 @@ export const useMarketStore = defineStore("trading-market", () => {
       if (normalizedSymbols && normalizedSymbols.length) {
         cryptoWatchSymbols.value = normalizedSymbols;
       }
+      quoteRequestCache.data = data;
+      quoteRequestCache.completedAt = Date.now();
       if (data.source === "cache_binance") {
         marketStatusMessage.value = "行情源不可用，正在显示本地缓存快照";
       }
@@ -163,6 +188,13 @@ export const useMarketStore = defineStore("trading-market", () => {
     limit = 200,
   } = {}) {
     const normalizedSymbol = normalizeCryptoSymbol(symbol);
+    const requestKey = stableRequestKey({ symbol: normalizedSymbol, period, limit });
+    const cachedKlineData = readFreshRequestCache(klineRequestCache, requestKey);
+    if (cachedKlineData) {
+      return cachedKlineData;
+    }
+    klineRequestCache.key = requestKey;
+
     cryptoKlineLoading.value = true;
     try {
       const { data } = await apiClient.get("/crypto/klines", {
@@ -180,6 +212,8 @@ export const useMarketStore = defineStore("trading-market", () => {
       if (marketSocketActive.value) {
         connectMarketSocket();
       }
+      klineRequestCache.data = data;
+      klineRequestCache.completedAt = Date.now();
       return data;
     } catch (error) {
       marketStatusMessage.value = "K 线源不可用，历史 K 线刷新失败";
@@ -191,12 +225,21 @@ export const useMarketStore = defineStore("trading-market", () => {
 
   async function fetchCryptoOrderBook(symbol, limit = 20) {
     const normalizedSymbol = normalizeCryptoSymbol(symbol || selectedCryptoSymbol.value);
+    const requestKey = stableRequestKey({ symbol: normalizedSymbol, limit });
+    const cachedOrderBookData = readFreshRequestCache(orderBookRequestCache, requestKey);
+    if (cachedOrderBookData) {
+      return cachedOrderBookData;
+    }
+    orderBookRequestCache.key = requestKey;
+
     orderBookLoading.value = true;
     try {
       const { data } = await apiClient.get("/crypto/orderbook", {
         params: { symbol: normalizedSymbol, limit },
       });
       upsertOrderBook(data);
+      orderBookRequestCache.data = data;
+      orderBookRequestCache.completedAt = Date.now();
       return data;
     } catch (error) {
       marketStatusMessage.value = "盘口源不可用，深度刷新失败";
@@ -339,6 +382,24 @@ export const useMarketStore = defineStore("trading-market", () => {
 
   function uniqueSymbols(symbols = []) {
     return uniqueCryptoSymbols(symbols);
+  }
+
+  function stableRequestKey(params = {}) {
+    return JSON.stringify(
+      Object.keys(params)
+        .sort()
+        .reduce((result, key) => {
+          result[key] = params[key];
+          return result;
+        }, {}),
+    );
+  }
+
+  function readFreshRequestCache(cache, key) {
+    if (cache.key !== key || !cache.data) {
+      return null;
+    }
+    return Date.now() - cache.completedAt < REQUEST_CACHE_MS ? cache.data : null;
   }
 
   function statusMessageForState(state) {

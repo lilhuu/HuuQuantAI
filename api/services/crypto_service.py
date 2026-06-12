@@ -1296,10 +1296,35 @@ class CryptoService:
         return ConnectionHealthResponse(**self.provider.get_connection_health())
 
     async def _load_strategy_market_data(self, symbols: list[str], period: str, limit: int) -> dict[str, list[dict[str, Any]]]:
+        normalized_symbols = self._normalize_symbols(symbols)
+        if not normalized_symbols:
+            raise ApiError(400, "No valid symbols were provided for strategy market data.", ErrorCode.STRATEGY_CONFIG_INVALID)
+
+        async def load_one(symbol: str) -> tuple[str, list[dict[str, Any]], str | None]:
+            try:
+                response = await self.get_klines(symbol=symbol, period=period, limit=limit)
+                rows = [item.model_dump() for item in response.items]
+                if not rows:
+                    return symbol, [], "empty kline response"
+                return symbol, rows, None
+            except Exception as exc:  # noqa: BLE001 - keep other symbols usable when one market request fails.
+                return symbol, [], str(exc)
+
+        results = await asyncio.gather(*(load_one(symbol) for symbol in normalized_symbols))
         market_data: dict[str, list[dict[str, Any]]] = {}
-        for symbol in self._normalize_symbols(symbols):
-            response = await self.get_klines(symbol=symbol, period=period, limit=limit)
-            market_data[symbol] = [item.model_dump() for item in response.items]
+        failures: dict[str, str] = {}
+        for symbol, rows, error in results:
+            if rows:
+                market_data[symbol] = rows
+            elif error:
+                failures[symbol] = error
+        if not market_data:
+            raise ApiError(
+                503,
+                "Strategy market data is unavailable for all requested symbols.",
+                ErrorCode.STRATEGY_CONFIG_INVALID,
+                details={"symbols": normalized_symbols, "failures": failures},
+            )
         return market_data
 
     async def _load_multi_timeframe_market_data(
