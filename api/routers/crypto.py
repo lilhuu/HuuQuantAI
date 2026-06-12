@@ -35,6 +35,7 @@ from api.models.response import (
     BinanceTestnetOrderResponse,
     BinanceTestnetStatusResponse,
     ConnectionHealthResponse,
+    CryptoDerivativeMetricsResponse,
     CryptoKLinesResponse,
     CryptoOrderBookResponse,
     CryptoPaperAccountResponse,
@@ -95,6 +96,7 @@ def _rate_limit_market_data(request: Request) -> None:
 @router.get("/quotes", response_model=CryptoQuotesResponse, summary="Get crypto quotes")
 async def get_crypto_quotes(
     symbols: str | None = Query(default=None, description="Comma-separated symbols, for example BTC/USDT,ETH/USDT."),
+    market_type: str = Query(default="spot", description="Binance market type: spot, um_futures, cm_futures, options."),
     search: str | None = Query(default=None, description="Search by symbol or base asset."),
     quote: str | None = Query(default=None, description="Quote currency filter, e.g. USDT."),
     limit: int = Query(default=0, ge=0, le=500, description="Page size. 0 returns all."),
@@ -102,11 +104,19 @@ async def get_crypto_quotes(
     _: None = Depends(_rate_limit_market_data),
     service: CryptoService = Depends(get_crypto_service),
 ) -> CryptoQuotesResponse:
-    return await service.get_quotes(_parse_symbols(symbols), search=search, quote=quote, limit=limit, offset=offset)
+    return await service.get_quotes(
+        _parse_symbols(symbols),
+        search=search,
+        quote=quote,
+        limit=limit,
+        offset=offset,
+        market_type=market_type,
+    )
 
 
 @router.get("/symbols", response_model=CryptoSymbolListResponse, summary="List available trading pairs")
 async def get_crypto_symbols(
+    market_type: str = Query(default="spot", description="Binance market type: spot, um_futures, cm_futures, options."),
     quote: str | None = Query(default=None, description="Quote currency filter, e.g. USDT."),
     search: str | None = Query(default=None, description="Search by symbol or base asset."),
     status: str = Query(default="active", description="Symbol status filter."),
@@ -114,28 +124,47 @@ async def get_crypto_symbols(
     offset: int = Query(default=0, ge=0),
     service: CryptoService = Depends(get_crypto_service),
 ) -> CryptoSymbolListResponse:
-    return await service.get_available_symbols(quote=quote, search=search, status=status, limit=limit, offset=offset)
+    return await service.get_available_symbols(
+        quote=quote,
+        search=search,
+        status=status,
+        limit=limit,
+        offset=offset,
+        market_type=market_type,
+    )
 
 
 @router.get("/klines", response_model=CryptoKLinesResponse, summary="Get crypto OHLCV candles")
 async def get_crypto_klines(
     symbol: str = Query(..., description="Trading pair, for example BTC/USDT."),
+    market_type: str = Query(default="spot", description="Binance market type: spot, um_futures, cm_futures, options."),
     period: str = Query(default="1h", description="Timeframe: 1m, 5m, 15m, 1h, 4h, 1d."),
     limit: int = Query(default=200, ge=1, le=1000, description="Number of candles."),
     _: None = Depends(_rate_limit_market_data),
     service: CryptoService = Depends(get_crypto_service),
 ) -> CryptoKLinesResponse:
-    return await service.get_klines(symbol=symbol, period=period, limit=limit)
+    return await service.get_klines(symbol=symbol, period=period, limit=limit, market_type=market_type)
 
 
 @router.get("/orderbook", response_model=CryptoOrderBookResponse, summary="Get crypto order book")
 async def get_crypto_orderbook(
     symbol: str = Query(..., description="Trading pair, for example BTC/USDT."),
+    market_type: str = Query(default="spot", description="Binance market type: spot, um_futures, cm_futures, options."),
     limit: int = Query(default=20, ge=1, le=100, description="Number of price levels per side."),
     _: None = Depends(_rate_limit_market_data),
     service: CryptoService = Depends(get_crypto_service),
 ) -> CryptoOrderBookResponse:
-    return await service.get_orderbook(symbol=symbol, limit=limit)
+    return await service.get_orderbook(symbol=symbol, limit=limit, market_type=market_type)
+
+
+@router.get("/derivatives/metrics", response_model=CryptoDerivativeMetricsResponse, summary="Get Binance derivative metrics")
+async def get_crypto_derivative_metrics(
+    symbol: str = Query(..., description="Derivative symbol, for example BTC/USDT."),
+    market_type: str = Query(default="um_futures", description="um_futures, cm_futures, or options."),
+    _: None = Depends(_rate_limit_market_data),
+    service: CryptoService = Depends(get_crypto_service),
+) -> CryptoDerivativeMetricsResponse:
+    return await service.get_derivative_metrics(market_type=market_type, symbol=symbol)
 
 
 @router.get("/market/regime", response_model=MarketRegimeBatchResponse, summary="Detect crypto market regime")

@@ -7,7 +7,7 @@ from api.main import app
 from api.routers import crypto_ws
 from api.services.auth_service import AuthService
 from api.services.crypto_service import CryptoService
-from core.binance_market_stream import build_binance_stream_url, normalize_binance_stream_message
+from core.binance_market_stream import build_binance_stream_url, normalize_binance_stream_message, normalize_mini_ticker_message
 from core.binance_testnet_executor import BinanceTestnetExecutor
 from core.crypto_backtest_engine import CryptoBacktestEngine
 from core.crypto_market_data_provider import CryptoMarketDataProvider
@@ -609,11 +609,53 @@ def test_binance_stream_message_normalization():
     assert shutdown["state"] == "reconnecting"
 
 
+def test_binance_stream_all_market_uses_official_mini_ticker_and_compact_symbols():
+    url, use_mini_ticker = build_binance_stream_url(
+        [],
+        period="1h",
+        depth_limit=20,
+        selected_symbol="BTC/USDT",
+        all_market=True,
+    )
+
+    assert use_mini_ticker is True
+    assert "!miniTicker@arr" in url
+    assert "btcusdt@kline_1h" in url
+    assert "btcusdt@depth20@1000ms" in url
+    assert "@ticker" not in url
+
+    batch = normalize_mini_ticker_message(
+        {
+            "stream": "!miniTicker@arr",
+            "data": [
+                {
+                    "e": "24hrMiniTicker",
+                    "E": 1770000000000,
+                    "s": "ETHBTC",
+                    "c": "0.05",
+                    "o": "0.04",
+                    "h": "0.052",
+                    "l": "0.039",
+                    "v": "100",
+                    "q": "5",
+                }
+            ],
+        }
+    )
+
+    assert batch["type"] == "crypto_ticker_batch"
+    assert batch["items"][0]["symbol"] == "ETH/BTC"
+    assert batch["items"][0]["amount"] == 5.0
+
+
 def test_crypto_websocket_auth_and_status(monkeypatch, tmp_path):
     auth_service = AuthService(storage_path=str(tmp_path / "auth.db"))
     session = auth_service.bootstrap_user(username="tester", password="password123", display_name="Tester")
 
-    async def fake_stream(websocket, service, symbols, period="1h", depth_limit=20, selected_symbol=None, proxy=None):
+    seen = {}
+
+    async def fake_stream(websocket, service, symbols, period="1h", depth_limit=20, selected_symbol=None, proxy=None, all_market=False):
+        seen["stream_all_market"] = all_market
         await websocket.send_json(
             {
                 "type": "crypto_status",
@@ -622,7 +664,8 @@ def test_crypto_websocket_auth_and_status(monkeypatch, tmp_path):
             }
         )
 
-    async def fake_snapshots(websocket, service, symbols, period, selected_symbol, depth_limit):
+    async def fake_snapshots(websocket, service, symbols, period, selected_symbol, depth_limit, all_market=False):
+        seen["snapshot_all_market"] = all_market
         await websocket.send_json(
             {
                 "type": "crypto_ticker",
@@ -657,7 +700,7 @@ def test_crypto_websocket_auth_and_status(monkeypatch, tmp_path):
 
     try:
         with TestClient(app) as client:
-            with client.websocket_connect("/ws/crypto?symbols=BTC/USDT&period=1h") as websocket:
+            with client.websocket_connect("/ws/crypto?all_market=1&selected_symbol=BTC/USDT&period=1h") as websocket:
                 websocket.send_json({"action": "auth", "token": session.access_token})
                 assert websocket.receive_json()["type"] == "auth_ok"
                 assert websocket.receive_json()["type"] == "crypto_status"
@@ -665,6 +708,7 @@ def test_crypto_websocket_auth_and_status(monkeypatch, tmp_path):
                 status = websocket.receive_json()
                 assert status["type"] == "crypto_status"
                 assert status["state"] == "connected"
+                assert seen == {"snapshot_all_market": True, "stream_all_market": True}
     finally:
         app.dependency_overrides.clear()
         get_crypto_service.cache_clear()

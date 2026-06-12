@@ -8,7 +8,7 @@ import { apiClient } from "../lib/api";
 import { formatCurrency, formatPercent, formatPrice, normalizeCryptoSymbol } from "../lib/tradingUtils";
 import { useAiAdvisorStore } from "../stores/aiAdvisor";
 import { useAutoTradingStore } from "../stores/autoTrading";
-import { useMarketStore } from "../stores/market";
+import { normalizeMarketSymbol, useMarketStore } from "../stores/market";
 import { usePortfolioStore } from "../stores/portfolio";
 import { useSystemStore } from "../stores/system";
 import { useUiStore } from "../stores/ui";
@@ -59,6 +59,15 @@ let initialRefreshTimer = null;
 
 const periods = ["1m", "5m", "15m", "1h", "4h", "1d"];
 const watchSymbols = ["BTC/USDT", "ETH/USDT", "DOGE/USDT", "SOL/USDT", "BNB/USDT"];
+const quoteFilters = [
+  { label: "全部", value: "ALL" },
+  { label: "USDT", value: "USDT" },
+  { label: "USDC", value: "USDC" },
+  { label: "FDUSD", value: "FDUSD" },
+  { label: "BTC", value: "BTC" },
+  { label: "ETH", value: "ETH" },
+  { label: "BNB", value: "BNB" },
+];
 const STRATEGY_RUN_TIMEOUT_MS = 45000;
 const STRATEGY_BACKTEST_TIMEOUT_MS = 90000;
 
@@ -73,11 +82,11 @@ const FEATURE_META = {
   },
   market: {
     eyebrow: "Market Intelligence",
-    title: "市场行情",
-    subtitle: "围绕交易对做行情筛选、K 线分析、盘口深度和 AI 市场解读。",
-    intent: "行情分析",
-    primary: "加载行情",
-    prompt: "分析当前交易对的趋势和波动风险",
+    title: "Binance Spot 全市场行情",
+    subtitle: "查看 Binance 活跃现货交易对，支持搜索、quote 筛选、排序、自选与单交易对 K 线/盘口联动。",
+    intent: "全市场行情",
+    primary: "刷新全市场",
+    prompt: "分析当前选中交易对的趋势和波动风险",
   },
   trade: {
     eyebrow: "Paper Execution",
@@ -162,9 +171,9 @@ const FEATURE_META = {
 };
 
 const meta = computed(() => FEATURE_META[props.feature] || FEATURE_META.dashboard);
-const selectedSymbol = computed(() => normalizeCryptoSymbol(marketStore.selectedCryptoSymbol || marketForm.symbol || "DOGE/USDT"));
+const selectedSymbol = computed(() => normalizeMarketSymbol(marketStore.selectedCryptoSymbol || marketForm.symbol || "DOGE/USDT", marketStore.marketType));
 const selectedQuote = computed(
-  () => marketStore.cryptoQuotes.find((item) => normalizeCryptoSymbol(item.symbol) === selectedSymbol.value) || marketStore.cryptoQuotes[0] || null,
+  () => marketStore.cryptoQuotes.find((item) => normalizeMarketSymbol(item.symbol, marketStore.marketType) === selectedSymbol.value) || marketStore.cryptoQuotes[0] || null,
 );
 const latestPrice = computed(() => Number(selectedQuote.value?.price || marketStore.cryptoKlines.at(-1)?.close || 0));
 const latestSignal = computed(() => aiStore.currentSignal || aiStore.signals[0] || null);
@@ -174,10 +183,15 @@ const positions = computed(() => systemStore.cryptoPositions || []);
 const logs = computed(() => systemStore.cryptoLogs || []);
 const decisions = computed(() => autoStore.decisions || []);
 const topQuotes = computed(() => [...(marketStore.cryptoQuotes || [])].slice(0, 8));
+const fullMarketQuotes = computed(() => marketStore.paginatedQuotes || []);
+const marketQuoteStart = computed(() => (marketStore.quotesTotal ? (marketStore.quotePage - 1) * marketStore.quotePageSize + 1 : 0));
+const marketQuoteEnd = computed(() => Math.min(marketStore.quotePage * marketStore.quotePageSize, marketStore.quotesTotal || 0));
 const orderBook = computed(() => marketStore.cryptoOrderBook || { bids: [], asks: [] });
 const topBids = computed(() => [...(orderBook.value.bids || [])].slice(0, 8));
 const topAsks = computed(() => [...(orderBook.value.asks || [])].slice(0, 8));
 const latestEquity = computed(() => systemStore.cryptoEquityCurve.at(-1) || null);
+const activeMarketLabel = computed(() => marketStore.activeMarketTab?.label || "现货");
+const showDerivativeMetrics = computed(() => marketStore.marketType !== "spot" && marketStore.derivativeMetrics);
 
 const dashboardMetrics = computed(() => [
   { label: "最新价", value: latestPrice.value ? formatPrice(latestPrice.value) : "--", hint: selectedSymbol.value, tone: "green" },
@@ -266,6 +280,31 @@ function useQuotePrice() {
   }
 }
 
+function activeQuoteFilter() {
+  const quote = String(marketStore.quoteFilter || (marketStore.marketType === "spot" ? "USDT" : "ALL")).toUpperCase();
+  return quote === "ALL" ? "ALL" : quote;
+}
+
+function switchMarketType(marketType) {
+  marketStore.setMarketType(marketType);
+  marketForm.symbol = marketStore.selectedCryptoSymbol || "BTC/USDT";
+  loadMarket();
+}
+
+function resetMarketPage() {
+  marketStore.quotePage = 1;
+}
+
+function setMarketSort(field) {
+  if (marketStore.quoteSortField === field) {
+    marketStore.quoteSortDir = marketStore.quoteSortDir === "asc" ? "desc" : "asc";
+  } else {
+    marketStore.quoteSortField = field;
+    marketStore.quoteSortDir = field === "symbol" ? "asc" : "desc";
+  }
+  resetMarketPage();
+}
+
 async function refreshAll() {
   const symbols = marketStore.cryptoWatchSymbols?.length ? marketStore.cryptoWatchSymbols : watchSymbols;
   await Promise.allSettled([
@@ -279,19 +318,53 @@ async function refreshAll() {
 }
 
 async function loadMarket() {
+  const symbol = normalizeMarketSymbol(marketForm.symbol || selectedSymbol.value, marketStore.marketType);
+  marketForm.symbol = symbol;
+  marketStore.selectedCryptoSymbol = symbol;
   await Promise.allSettled([
+    marketStore.fetchCryptoSymbols({
+      marketType: marketStore.marketType,
+      search: marketStore.quoteSearch || undefined,
+      quote: activeQuoteFilter(),
+      limit: 500,
+      offset: 0,
+    }),
     marketStore.fetchCryptoQuotes(null, {
-      search: marketForm.search || undefined,
-      quote: "USDT",
+      marketType: marketStore.marketType,
+      search: marketStore.quoteSearch || undefined,
+      quote: activeQuoteFilter(),
       limit: 0,
       offset: 0,
     }),
     marketStore.fetchCryptoKlines({
-      symbol: marketForm.symbol,
+      marketType: marketStore.marketType,
+      symbol,
       period: marketForm.period,
       limit: Number(marketForm.limit || 200),
     }),
-    marketStore.fetchCryptoOrderBook(marketForm.symbol, 20),
+    marketStore.fetchCryptoOrderBook(symbol, 20, { marketType: marketStore.marketType }),
+    marketStore.fetchDerivativeMetrics(symbol, { marketType: marketStore.marketType }),
+  ]);
+  marketStore.connectMarketSocket({ allMarket: true });
+}
+
+async function selectMarketQuote(quote) {
+  const symbol = normalizeMarketSymbol(quote?.symbol, marketStore.marketType);
+  if (!symbol) {
+    return;
+  }
+  marketForm.symbol = symbol;
+  orderForm.symbol = symbol;
+  marketStore.selectedCryptoSymbol = symbol;
+  await Promise.allSettled([
+    marketStore.fetchCryptoKlines({
+      marketType: marketStore.marketType,
+      symbol,
+      period: marketForm.period,
+      limit: Number(marketForm.limit || 200),
+    }),
+    marketStore.fetchCryptoOrderBook(symbol, 20, { marketType: marketStore.marketType }),
+    marketStore.fetchDerivativeMetrics(symbol, { marketType: marketStore.marketType }),
   ]);
 }
 
@@ -552,6 +625,28 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else-if="feature === 'market'" class="cq-distinct-grid cq-distinct-grid--market" data-feature-role="market-intelligence">
+      <article class="cq-feature-panel cq-span-3" data-market-tabs="binance-public-market">
+        <div class="cq-panel-headline">
+          <div>
+            <span>Binance 公共行情</span>
+            <h2>{{ activeMarketLabel }}全市场</h2>
+          </div>
+          <b>{{ marketStore.marketType }}</b>
+        </div>
+        <div class="cq-button-row">
+          <button
+            v-for="tab in marketStore.marketTabs"
+            :key="tab.value"
+            class="cq-command-button"
+            :class="{ 'cq-command-button--primary': marketStore.marketType === tab.value }"
+            type="button"
+            :data-market-type-tab="tab.value"
+            @click="switchMarketType(tab.value)"
+          >
+            {{ tab.label }}
+          </button>
+        </div>
+      </article>
       <article class="cq-feature-panel cq-span-2">
         <div class="cq-panel-headline">
           <div>
@@ -568,6 +663,10 @@ onBeforeUnmount(() => {
           <input v-model.number="marketForm.limit" type="number" min="50" max="1000" />
           <button class="cq-command-button cq-command-button--primary" type="button" @click="loadMarket">加载</button>
         </div>
+        <p class="cq-empty-note">
+          {{ marketStore.marketStatusMessage }} · 数据源 {{ marketStore.cryptoKlineSource || "binance" }} ·
+          {{ marketStore.lastMarketMessageAt || "等待刷新" }}
+        </p>
         <CryptoKlineChart :candles="marketStore.cryptoKlines" :height="360" />
       </article>
       <article class="cq-feature-panel">
@@ -592,28 +691,127 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </article>
+      <article v-if="showDerivativeMetrics" class="cq-feature-panel" data-market-derivatives="metrics">
+        <div class="cq-panel-headline">
+          <div>
+            <span>衍生指标</span>
+            <h2>{{ marketStore.derivativeMetrics?.symbol }}</h2>
+          </div>
+          <b>{{ marketStore.derivativeMetrics?.source || "binance" }}</b>
+        </div>
+        <div class="cq-command-steps">
+          <div>
+            <strong>标记价格</strong>
+            <span>{{ formatPrice(marketStore.derivativeMetrics?.mark_price || 0) }}</span>
+          </div>
+          <div>
+            <strong>指数价格</strong>
+            <span>{{ formatPrice(marketStore.derivativeMetrics?.index_price || 0) }}</span>
+          </div>
+          <div>
+            <strong>资金费率</strong>
+            <span>{{ pct(marketStore.derivativeMetrics?.funding_rate || 0) }}</span>
+          </div>
+          <div>
+            <strong>持仓量</strong>
+            <span>{{ formatPrice(marketStore.derivativeMetrics?.open_interest || 0) }}</span>
+          </div>
+        </div>
+      </article>
       <article class="cq-feature-panel cq-span-3">
         <div class="cq-panel-headline">
           <div>
-            <span>交易对列表</span>
-            <h2>行情筛选</h2>
+            <span>Binance {{ activeMarketLabel }}</span>
+            <h2>全市场行情</h2>
           </div>
-          <input v-model="marketForm.search" class="cq-compact-input" placeholder="搜索 BTC / DOGE" />
+          <b>{{ marketStore.quotesTotal }} 个交易对</b>
+        </div>
+        <div class="cq-form-strip">
+          <select
+            v-model="marketStore.quoteFilter"
+            data-quote-filter="spot-market"
+            @change="resetMarketPage(); loadMarket()"
+          >
+            <option v-for="item in marketStore.quoteFilterOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
+          </select>
+          <input
+            v-model="marketStore.quoteSearch"
+            class="cq-compact-input"
+            data-market-search="spot-market"
+            placeholder="搜索 BTC / DOGE"
+            @input="resetMarketPage"
+          />
+          <select v-model="marketStore.quoteSortField" @change="resetMarketPage">
+            <option value="amount">成交额</option>
+            <option value="change">涨跌幅</option>
+            <option value="price">最新价</option>
+            <option value="volume">成交量</option>
+            <option value="symbol">交易对</option>
+          </select>
+          <button
+            class="cq-command-button cq-command-button--primary"
+            type="button"
+            data-market-table-refresh="spot-market"
+            @click="loadMarket"
+          >
+            刷新行情
+          </button>
         </div>
         <div class="cq-table-shell">
-          <table>
-            <thead><tr><th>交易对</th><th>最新价</th><th>24h 涨跌</th><th>成交量</th><th>来源</th></tr></thead>
+          <table data-market-table="spot-quotes">
+            <thead>
+              <tr>
+                <th><button class="cq-table-eye" type="button" @click="setMarketSort('symbol')">交易对</button></th>
+                <th><button class="cq-table-eye" type="button" @click="setMarketSort('price')">最新价</button></th>
+                <th><button class="cq-table-eye" type="button" @click="setMarketSort('change')">24h 涨跌</button></th>
+                <th><button class="cq-table-eye" type="button" @click="setMarketSort('volume')">成交量</button></th>
+                <th><button class="cq-table-eye" type="button" @click="setMarketSort('amount')">成交额</button></th>
+                <th>最高价</th>
+                <th>最低价</th>
+                <th>更新时间</th>
+              </tr>
+            </thead>
             <tbody>
-              <tr v-for="quote in topQuotes" :key="quote.symbol">
+              <tr
+                v-for="quote in fullMarketQuotes"
+                :key="quote.symbol"
+                :data-market-symbol="quote.symbol"
+                class="cq-clickable-row"
+                @click="selectMarketQuote(quote)"
+              >
                 <td>{{ quote.symbol }}</td>
                 <td>{{ formatPrice(quote.price) }}</td>
                 <td :class="Number(quote.change || 0) >= 0 ? 'number-up' : 'number-down'">{{ pct(quote.change) }}</td>
-                <td>{{ formatPrice(quote.volume || quote.amount || 0) }}</td>
-                <td>{{ quote.source || "-" }}</td>
+                <td>{{ formatPrice(quote.volume || 0) }}</td>
+                <td>{{ formatPrice(quote.amount || 0) }}</td>
+                <td>{{ formatPrice(quote.high || 0) }}</td>
+                <td>{{ formatPrice(quote.low || 0) }}</td>
+                <td>{{ compactTime(quote.timestamp) }}</td>
               </tr>
-              <tr v-if="!topQuotes.length"><td colspan="5">暂无行情，点击加载行情。</td></tr>
+              <tr v-if="!fullMarketQuotes.length"><td colspan="8">暂无行情，点击刷新行情。</td></tr>
             </tbody>
           </table>
+        </div>
+        <div class="cq-button-row">
+          <button
+            class="cq-command-button"
+            type="button"
+            :disabled="marketStore.quotePage <= 1"
+            @click="marketStore.quotePage = Math.max(1, marketStore.quotePage - 1)"
+          >
+            上一页
+          </button>
+          <span class="cq-empty-note">
+            {{ marketQuoteStart }}-{{ marketQuoteEnd }} / {{ marketStore.quotesTotal }} · 第 {{ marketStore.quotePage }} / {{ marketStore.totalPages }} 页
+          </span>
+          <button
+            class="cq-command-button"
+            type="button"
+            :disabled="marketStore.quotePage >= marketStore.totalPages"
+            @click="marketStore.quotePage = Math.min(marketStore.totalPages, marketStore.quotePage + 1)"
+          >
+            下一页
+          </button>
         </div>
       </article>
     </div>

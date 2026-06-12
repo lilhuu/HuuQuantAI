@@ -34,6 +34,19 @@ def _quote(symbol="BTC/USDT", price=65000):
     }
 
 
+def _symbol_row(symbol, base=None, quote=None, status="active"):
+    base_value, quote_value = (symbol.split("/", 1) + [""])[:2]
+    return {
+        "symbol": symbol,
+        "base": base or base_value,
+        "quote": quote or quote_value,
+        "status": status,
+        "price_precision": 8,
+        "quantity_precision": 8,
+        "min_notional": 5.0,
+    }
+
+
 def _kline(symbol="BTC/USDT", close=65000):
     return {
         "symbol": symbol,
@@ -140,6 +153,10 @@ def test_get_quotes_specific_all_search_pagination_and_cache(tmp_path):
     assert all_rows.items[0].symbol == "BTC/USDT"
     service.provider.fetch_all_tickers.assert_called()
 
+    all_quotes = asyncio.run(service.get_quotes(None, quote="ALL", limit=0, offset=0))
+    assert {item.symbol for item in all_quotes.items} == {"BTC/USDT", "ETH/USDT", "SOL/USDT"}
+    service.provider.fetch_all_tickers.assert_called_with(quote=None)
+
     empty = asyncio.run(service.get_quotes([]))
     assert empty.items == []
     assert empty.count == 0
@@ -153,6 +170,85 @@ def test_get_quotes_specific_all_search_pagination_and_cache(tmp_path):
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(service.get_quotes(["BTC/USDT"]))
     assert exc_info.value.status_code == 503
+
+
+def test_get_quotes_all_market_fallbacks_to_cached_page(tmp_path):
+    service = _service(tmp_path)
+    service.provider.fetch_all_tickers = MagicMock(side_effect=RuntimeError("binance down"))
+    service.market_cache.get_quote_page = MagicMock(return_value=([_quote("ETH/BTC", 0.05, ), _quote("BTC/USDT")], 2))
+
+    cached = asyncio.run(service.get_quotes(None, quote="ALL", search="btc", limit=25, offset=50))
+
+    assert cached.source == "cache_binance"
+    assert cached.count == 2
+    assert cached.total == 2
+    assert cached.limit == 25
+    assert cached.offset == 50
+    service.market_cache.get_quote_page.assert_called_once_with(quote=None, search="btc", limit=25, offset=50)
+
+
+def test_get_quotes_for_usdm_futures_uses_public_provider_and_cache(tmp_path):
+    service = _service(tmp_path)
+    service.public_provider.fetch_all_tickers = MagicMock(
+        return_value=[
+            {
+                **_quote("BTC/USDT"),
+                "market_type": "um_futures",
+                "base": "BTC",
+                "quote": "USDT",
+                "source": "binance_um_futures",
+            }
+        ]
+    )
+    service.market_cache.upsert_market_quotes = MagicMock()
+
+    result = asyncio.run(service.get_quotes(None, market_type="um_futures", quote="USDT"))
+
+    assert result.count == 1
+    assert result.source == "binance_um_futures"
+    assert result.items[0].market_type == "um_futures"
+    service.public_provider.fetch_all_tickers.assert_called_once_with("um_futures", quote="USDT")
+    service.market_cache.upsert_market_quotes.assert_called_once()
+
+    service.public_provider.fetch_all_tickers = MagicMock(side_effect=RuntimeError("down"))
+    service.market_cache.get_market_quote_page = MagicMock(
+        return_value=(
+            [
+                {
+                    **_quote("BTC/USDT"),
+                    "market_type": "um_futures",
+                    "base": "BTC",
+                    "quote": "USDT",
+                    "source": "cache_binance_um_futures",
+                }
+            ],
+            1,
+        )
+    )
+    cached = asyncio.run(service.get_quotes(None, market_type="um_futures", quote="USDT", limit=50, offset=0))
+    assert cached.source == "cache_binance_um_futures"
+
+
+def test_derivative_metrics_uses_public_provider(tmp_path):
+    service = _service(tmp_path)
+    service.public_provider.fetch_derivative_metrics = MagicMock(
+        return_value={
+            "market_type": "um_futures",
+            "symbol": "BTC/USDT",
+            "mark_price": 65010,
+            "index_price": 65005,
+            "funding_rate": 0.0001,
+            "open_interest": 12345,
+            "timestamp": "2026-06-03T00:00:00Z",
+            "source": "binance_um_futures",
+        }
+    )
+
+    result = asyncio.run(service.get_derivative_metrics("um_futures", "BTC/USDT"))
+
+    assert result.market_type == "um_futures"
+    assert result.mark_price == 65010
+    assert result.open_interest == 12345
 
 
 def test_get_available_symbols_cache_and_market_load(tmp_path):
@@ -173,6 +269,49 @@ def test_get_available_symbols_cache_and_market_load(tmp_path):
     service.provider.load_markets = MagicMock(side_effect=RuntimeError("down"))
     failed = asyncio.run(service.get_available_symbols())
     assert failed.total == 0
+
+
+def test_get_available_symbols_all_quote_uses_all_active_spot_markets(tmp_path):
+    service = _service(tmp_path)
+    service.market_cache.get_symbols = MagicMock(
+        side_effect=[
+            ([], 0),
+            ([_symbol_row("BTC/USDT"), _symbol_row("ETH/BTC"), _symbol_row("BNB/USDC")], 3),
+        ]
+    )
+    service.provider.load_markets = MagicMock(
+        return_value=[
+            _symbol_row("BTC/USDT"),
+            _symbol_row("ETH/BTC"),
+            _symbol_row("BNB/USDC"),
+        ]
+    )
+    service.market_cache.upsert_exchange_info = MagicMock()
+
+    result = asyncio.run(service.get_available_symbols(quote="ALL"))
+
+    assert result.total == 3
+    assert {item.quote for item in result.items} == {"USDT", "BTC", "USDC"}
+    assert service.market_cache.get_symbols.call_args_list[0].kwargs["quote"] is None
+    assert service.market_cache.get_symbols.call_args_list[1].kwargs["quote"] is None
+
+
+def test_get_available_symbols_all_quote_refreshes_legacy_usdt_only_cache(tmp_path):
+    service = _service(tmp_path)
+    service.market_cache.get_symbols = MagicMock(
+        side_effect=[
+            ([_symbol_row("BTC/USDT")], 1),
+            ([_symbol_row("BTC/USDT"), _symbol_row("ETH/BTC")], 2),
+        ]
+    )
+    service.provider.load_markets = MagicMock(return_value=[_symbol_row("BTC/USDT"), _symbol_row("ETH/BTC")])
+    service.market_cache.upsert_exchange_info = MagicMock()
+
+    result = asyncio.run(service.get_available_symbols(quote="ALL"))
+
+    assert result.total == 2
+    service.provider.load_markets.assert_called_once()
+    service.market_cache.upsert_exchange_info.assert_called_once()
 
 
 def test_get_klines_and_orderbook_success_fallback_errors(tmp_path):

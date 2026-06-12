@@ -10,12 +10,39 @@ from typing import Any, Iterable, Optional
 
 from fastapi import WebSocket
 
+from core.binance_public_market_provider import normalize_instrument_symbol, normalize_market_type
 from core.crypto_market_data_provider import SUPPORTED_TIMEFRAMES, normalize_crypto_symbol
 
 
-BINANCE_SPOT_WS_BASE = "wss://stream.binance.com:9443/stream"
+BINANCE_WS_BASES = {
+    "spot": "wss://stream.binance.com:9443/stream",
+    "um_futures": "wss://fstream.binance.com/stream",
+    "cm_futures": "wss://dstream.binance.com/stream",
+    "options": "wss://nbstream.binance.com/eoptions/stream",
+}
 MINI_TICKER_SYMBOL_THRESHOLD = 50
 MINI_TICKER_THROTTLE_SECONDS = 2.0
+BINANCE_QUOTE_ASSETS = (
+    "FDUSD",
+    "USDT",
+    "USDC",
+    "TUSD",
+    "BUSD",
+    "USDP",
+    "DAI",
+    "BTC",
+    "ETH",
+    "BNB",
+    "TRY",
+    "EUR",
+    "BRL",
+    "AUD",
+    "GBP",
+    "RUB",
+    "UAH",
+    "ZAR",
+    "BIDR",
+)
 
 
 def build_binance_stream_url(
@@ -23,6 +50,8 @@ def build_binance_stream_url(
     period: str = "1h",
     depth_limit: int = 20,
     selected_symbol: Optional[str] = None,
+    all_market: bool = False,
+    market_type: str = "spot",
 ) -> tuple[str, bool]:
     """Build a Binance combined stream URL and whether miniTicker mode is active.
 
@@ -30,14 +59,15 @@ def build_binance_stream_url(
     When symbols exceed MINI_TICKER_SYMBOL_THRESHOLD, uses !miniTicker@arr
     instead of individual @ticker streams.
     """
-    normalized_symbols = _unique_symbols(symbols)
-    primary = normalize_crypto_symbol(selected_symbol) if selected_symbol else ""
+    normalized_market_type = normalize_market_type(market_type)
+    normalized_symbols = _unique_symbols(symbols, normalized_market_type)
+    primary = normalize_instrument_symbol(selected_symbol, normalized_market_type) if selected_symbol else ""
     if not primary or primary not in normalized_symbols:
         primary = normalized_symbols[0] if normalized_symbols else "BTC/USDT"
 
     normalized_period = SUPPORTED_TIMEFRAMES.get(str(period or "1h"), "1h")
     normalized_depth = 5 if depth_limit <= 5 else 10 if depth_limit <= 10 else 20
-    use_mini_ticker = len(normalized_symbols) >= MINI_TICKER_SYMBOL_THRESHOLD
+    use_mini_ticker = all_market or len(normalized_symbols) >= MINI_TICKER_SYMBOL_THRESHOLD
 
     streams = []
     if use_mini_ticker:
@@ -49,10 +79,10 @@ def build_binance_stream_url(
     primary_stream_symbol = _binance_symbol(primary)
     streams.append(f"{primary_stream_symbol}@kline_{normalized_period}")
     streams.append(f"{primary_stream_symbol}@depth{normalized_depth}@1000ms")
-    return f"{BINANCE_SPOT_WS_BASE}?streams={'/'.join(streams)}", use_mini_ticker
+    return f"{BINANCE_WS_BASES[normalized_market_type]}?streams={'/'.join(streams)}", use_mini_ticker
 
 
-def normalize_binance_stream_message(raw_payload: str | dict[str, Any]) -> Optional[dict[str, Any]]:
+def normalize_binance_stream_message(raw_payload: str | dict[str, Any], market_type: str = "spot") -> Optional[dict[str, Any]]:
     """Convert Binance combined-stream messages to the app's stable message shapes."""
     if isinstance(raw_payload, str):
         payload = json.loads(raw_payload)
@@ -72,17 +102,17 @@ def normalize_binance_stream_message(raw_payload: str | dict[str, Any]) -> Optio
             "timestamp": _iso_from_ms(data.get("E")),
         }
     if event_type == "24hrTicker":
-        return {"type": "crypto_ticker", "item": normalize_binance_ticker(data)}
+        return {"type": "crypto_ticker", "item": normalize_binance_ticker(data, market_type=market_type)}
     if event_type == "kline" and isinstance(data.get("k"), dict):
-        return {"type": "crypto_kline", "item": normalize_binance_kline(data["k"])}
+        return {"type": "crypto_kline", "item": normalize_binance_kline(data["k"], market_type=market_type)}
     if "bids" in data or "asks" in data:
-        return {"type": "crypto_depth", "item": normalize_binance_depth(data, stream)}
+        return {"type": "crypto_depth", "item": normalize_binance_depth(data, stream, market_type=market_type)}
     if "b" in data and "a" in data and "@depth" in stream:
-        return {"type": "crypto_depth", "item": normalize_binance_depth(data, stream)}
+        return {"type": "crypto_depth", "item": normalize_binance_depth(data, stream, market_type=market_type)}
     return None
 
 
-def normalize_mini_ticker_message(raw_payload: str | dict[str, Any]) -> Optional[dict[str, Any]]:
+def normalize_mini_ticker_message(raw_payload: str | dict[str, Any], market_type: str = "spot") -> Optional[dict[str, Any]]:
     """Parse a !miniTicker@arr message, returning None if it is not a miniTicker payload."""
     if isinstance(raw_payload, str):
         payload = json.loads(raw_payload)
@@ -92,14 +122,14 @@ def normalize_mini_ticker_message(raw_payload: str | dict[str, Any]) -> Optional
         return None
     data = payload.get("data")
     if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
-        items = [_normalize_mini_ticker_item(item) for item in data]
+        items = [_normalize_mini_ticker_item(item, market_type=market_type) for item in data]
         return {"type": "crypto_ticker_batch", "items": [item for item in items if item]}
     return None
 
 
-def _normalize_mini_ticker_item(item: dict[str, Any]) -> Optional[dict[str, Any]]:
+def _normalize_mini_ticker_item(item: dict[str, Any], market_type: str = "spot") -> Optional[dict[str, Any]]:
     """Convert a single miniTicker array element to our standard ticker shape."""
-    symbol = _symbol_from_binance(item.get("s"))
+    symbol = _symbol_from_binance(item.get("s"), market_type=market_type)
     if not symbol:
         return None
     price = _float(item.get("c"))
@@ -107,6 +137,7 @@ def _normalize_mini_ticker_item(item: dict[str, Any]) -> Optional[dict[str, Any]
     change_amount = price - open_price if open_price > 0 else 0.0
     return {
         "symbol": symbol,
+        "market_type": normalize_market_type(market_type),
         "price": price,
         "open": open_price,
         "high": _float(item.get("h")),
@@ -122,14 +153,15 @@ def _normalize_mini_ticker_item(item: dict[str, Any]) -> Optional[dict[str, Any]
     }
 
 
-def normalize_binance_ticker(data: dict[str, Any]) -> dict[str, Any]:
-    symbol = _symbol_from_binance(data.get("s"))
+def normalize_binance_ticker(data: dict[str, Any], market_type: str = "spot") -> dict[str, Any]:
+    symbol = _symbol_from_binance(data.get("s"), market_type=market_type)
     price = _float(data.get("c"))
     open_price = _float(data.get("o"))
     change_amount = _float(data.get("p"))
     percentage = _float(data.get("P"))
     return {
         "symbol": symbol,
+        "market_type": normalize_market_type(market_type),
         "price": price,
         "open": open_price,
         "high": _float(data.get("h")),
@@ -145,8 +177,8 @@ def normalize_binance_ticker(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def normalize_binance_kline(data: dict[str, Any]) -> dict[str, Any]:
-    symbol = _symbol_from_binance(data.get("s"))
+def normalize_binance_kline(data: dict[str, Any], market_type: str = "spot") -> dict[str, Any]:
+    symbol = _symbol_from_binance(data.get("s"), market_type=market_type)
     period = str(data.get("i") or "1m")
     close = _float(data.get("c"))
     volume = _float(data.get("v"))
@@ -166,8 +198,8 @@ def normalize_binance_kline(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def normalize_binance_depth(data: dict[str, Any], stream: str = "") -> dict[str, Any]:
-    symbol = _symbol_from_binance(data.get("s") or stream.split("@", 1)[0])
+def normalize_binance_depth(data: dict[str, Any], stream: str = "", market_type: str = "spot") -> dict[str, Any]:
+    symbol = _symbol_from_binance(data.get("s") or stream.split("@", 1)[0], market_type=market_type)
     bids = data.get("bids") if "bids" in data else data.get("b")
     asks = data.get("asks") if "asks" in data else data.get("a")
     return {
@@ -186,24 +218,26 @@ async def send_initial_market_snapshots(
     period: str,
     selected_symbol: str,
     depth_limit: int,
+    all_market: bool = False,
+    market_type: str = "spot",
 ) -> None:
     """Send REST snapshots before the Binance stream starts producing live ticks."""
     try:
-        quotes = await service.get_quotes(symbols)
+        quotes = await service.get_quotes(None, quote="ALL", limit=0, offset=0, market_type=market_type) if all_market else await service.get_quotes(symbols, market_type=market_type)
         for item in quotes.items:
             await websocket.send_json({"type": "crypto_ticker", "item": item.model_dump()})
     except Exception as exc:
         await websocket.send_json(_error_message(f"REST 行情快照不可用: {exc}"))
 
     try:
-        klines = await service.get_klines(selected_symbol, period=period, limit=200)
+        klines = await service.get_klines(selected_symbol, period=period, limit=200, market_type=market_type)
         for item in klines.items:
             await websocket.send_json({"type": "crypto_kline", "item": item.model_dump()})
     except Exception as exc:
         await websocket.send_json(_error_message(f"REST K 线快照不可用: {exc}"))
 
     try:
-        depth = await service.get_orderbook(selected_symbol, limit=depth_limit)
+        depth = await service.get_orderbook(selected_symbol, limit=depth_limit, market_type=market_type)
         await websocket.send_json({"type": "crypto_depth", "item": depth.model_dump()})
     except Exception as exc:
         await websocket.send_json(_error_message(f"REST 盘口快照不可用: {exc}"))
@@ -217,6 +251,8 @@ async def stream_binance_market(
     depth_limit: int = 20,
     selected_symbol: str | None = None,
     proxy: str | None = None,
+    all_market: bool = False,
+    market_type: str = "spot",
 ) -> None:
     """Proxy Binance Spot market streams to the connected frontend websocket."""
     try:
@@ -225,15 +261,17 @@ async def stream_binance_market(
         await websocket.send_json(_error_message(f"websockets 依赖未安装: {exc}"))
         return
 
-    normalized_symbols = _unique_symbols(symbols) or ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
-    selected = normalize_crypto_symbol(selected_symbol) or normalized_symbols[0]
-    use_mini_ticker = len(normalized_symbols) >= MINI_TICKER_SYMBOL_THRESHOLD
+    normalized_market_type = normalize_market_type(market_type)
+    normalized_symbols = _unique_symbols(symbols, normalized_market_type) or ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
+    selected = normalize_instrument_symbol(selected_symbol, normalized_market_type) or normalized_symbols[0]
+    use_mini_ticker = all_market or len(normalized_symbols) >= MINI_TICKER_SYMBOL_THRESHOLD
     reconnect_attempt = 0
     last_mini_ticker_send = 0.0
     while True:
         reconnect_attempt += 1
         url, _ = build_binance_stream_url(
-            normalized_symbols, period=period, depth_limit=depth_limit, selected_symbol=selected
+            normalized_symbols, period=period, depth_limit=depth_limit, selected_symbol=selected, all_market=all_market
+            , market_type=normalized_market_type
         )
         await websocket.send_json(
             {
@@ -256,7 +294,7 @@ async def stream_binance_market(
                 )
                 async for raw in upstream:
                     if use_mini_ticker:
-                        batch = normalize_mini_ticker_message(raw)
+                        batch = normalize_mini_ticker_message(raw, market_type=normalized_market_type)
                         if batch and batch.get("type") == "crypto_ticker_batch":
                             now = time.monotonic()
                             if now - last_mini_ticker_send >= MINI_TICKER_THROTTLE_SECONDS:
@@ -268,7 +306,7 @@ async def stream_binance_market(
                                 except Exception:
                                     pass
                             continue
-                    message = normalize_binance_stream_message(raw)
+                    message = normalize_binance_stream_message(raw, market_type=normalized_market_type)
                     if not message:
                         continue
                     if message["type"] == "crypto_ticker":
@@ -290,23 +328,30 @@ async def stream_binance_market(
             await asyncio.sleep(delay)
 
 
-def _unique_symbols(symbols: Iterable[str]) -> list[str]:
+def _unique_symbols(symbols: Iterable[str], market_type: str = "spot") -> list[str]:
     normalized: list[str] = []
     for symbol in symbols:
-        item = normalize_crypto_symbol(symbol)
+        item = normalize_instrument_symbol(symbol, market_type)
         if item and item not in normalized:
             normalized.append(item)
     return normalized
 
 
 def _binance_symbol(symbol: str) -> str:
-    return normalize_crypto_symbol(symbol).replace("/", "").lower()
+    return str(symbol or "").strip().upper().replace("/", "").lower()
 
 
-def _symbol_from_binance(value: Any, quote: str = "USDT") -> str:
+def _symbol_from_binance(value: Any, quote: str = "USDT", market_type: str = "spot") -> str:
     text = str(value or "").strip().upper()
     if not text:
         return ""
+    normalized_market_type = normalize_market_type(market_type)
+    if normalized_market_type == "options" or "_" in text:
+        return text
+    if "/" not in text:
+        for quote_asset in BINANCE_QUOTE_ASSETS:
+            if text.endswith(quote_asset) and len(text) > len(quote_asset):
+                return f"{text[:-len(quote_asset)]}/{quote_asset}"
     return normalize_crypto_symbol(text, quote_currency=quote)
 
 

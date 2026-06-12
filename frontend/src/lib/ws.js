@@ -45,13 +45,18 @@ export function sendSocketAuth(socket) {
 export function createCryptoSocket(options = {}) {
   const params = {};
   const symbols = Array.isArray(options) ? options : options.symbols || [];
-  if (symbols.length) {
+  const allMarket = !Array.isArray(options) && Boolean(options.allMarket);
+  if (symbols.length && !allMarket) {
     params.symbols = symbols.join(",");
   }
   if (!Array.isArray(options)) {
     params.period = options.period;
     params.selected_symbol = options.selectedSymbol;
     params.depth_limit = options.depthLimit;
+    params.market_type = options.marketType;
+    if (allMarket) {
+      params.all_market = 1;
+    }
   }
   return buildSocket("/ws/crypto", params);
 }

@@ -283,6 +283,53 @@ describe("view smoke tests", () => {
     backtest.unmount();
   });
 
+  it("renders a Binance Spot market table and loads details for the selected symbol only", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const marketStore = useMarketStore();
+    marketStore.cryptoQuotes = [
+      { symbol: "BTC/USDT", price: 65000, amount: 1000, volume: 2, change: 0.01, high: 66000, low: 64000 },
+      { symbol: "ETH/BTC", price: 0.05, amount: 3000, volume: 50, change: -0.02, high: 0.052, low: 0.049 },
+    ];
+    marketStore.quoteFilter = "ALL";
+    marketStore.quoteSortField = "amount";
+    marketStore.quoteSortDir = "desc";
+
+    const fetchQuotes = vi.spyOn(marketStore, "fetchCryptoQuotes").mockResolvedValue({});
+    const fetchKlines = vi.spyOn(marketStore, "fetchCryptoKlines").mockResolvedValue({});
+    const fetchOrderBook = vi.spyOn(marketStore, "fetchCryptoOrderBook").mockResolvedValue({});
+    const connectMarketSocket = vi.spyOn(marketStore, "connectMarketSocket").mockImplementation(() => {});
+
+    const wrapper = shallowMount(FeatureCommandView, {
+      props: { feature: "market" },
+      global: { plugins: [pinia], stubs: { CryptoKlineChart: true, BacktestChart: true } },
+    });
+
+    expect(wrapper.find('[data-market-table="spot-quotes"]').text()).toContain("ETH/BTC");
+    expect(wrapper.find('[data-quote-filter="spot-market"]').exists()).toBe(true);
+    expect(wrapper.find('[data-market-search="spot-market"]').exists()).toBe(true);
+    expect(wrapper.find('[data-market-type-tab="um_futures"]').exists()).toBe(true);
+
+    await wrapper.find('[data-market-symbol="ETH/BTC"]').trigger("click");
+
+    expect(fetchKlines).toHaveBeenCalledWith(expect.objectContaining({ symbol: "ETH/BTC" }));
+    expect(fetchOrderBook).toHaveBeenCalledWith("ETH/BTC", 20, expect.objectContaining({ marketType: "spot" }));
+    expect(fetchQuotes).not.toHaveBeenCalled();
+    expect(connectMarketSocket).not.toHaveBeenCalled();
+
+    await wrapper.find('[data-market-table-refresh="spot-market"]').trigger("click");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fetchQuotes).toHaveBeenCalledWith(null, expect.objectContaining({ quote: "ALL" }));
+    expect(connectMarketSocket).toHaveBeenCalledWith({ allMarket: true });
+
+    await wrapper.find('[data-market-type-tab="um_futures"]').trigger("click");
+    expect(marketStore.marketType).toBe("um_futures");
+    expect(fetchQuotes).toHaveBeenCalledWith(null, expect.objectContaining({ marketType: "um_futures" }));
+
+    wrapper.unmount();
+  });
+
   it("does not run a backtest on mount and uses a longer timeout when requested", async () => {
     vi.useFakeTimers();
     const pinia = createPinia();

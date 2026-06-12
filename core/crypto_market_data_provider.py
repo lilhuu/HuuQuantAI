@@ -110,7 +110,7 @@ class CryptoMarketDataProvider:
         exchange = self._get_exchange()
         raw_tickers = exchange.fetch_tickers()
         items: List[Dict[str, Any]] = []
-        target_quote = normalize_crypto_symbol(quote or "", self.default_quote_currency).split("/")[-1] if quote else None
+        target_quote = self._normalize_quote_filter(quote)
         for raw_symbol, ticker in (raw_tickers or {}).items():
             symbol = normalize_crypto_symbol(raw_symbol, self.default_quote_currency)
             if not symbol:
@@ -241,7 +241,7 @@ class CryptoMarketDataProvider:
         return items
 
     def load_markets(self, reload: bool = False) -> list[dict[str, Any]]:
-        """Fetch all spot market info, filtered to USDT quote pairs.
+        """Fetch all spot market info.
 
         Returns a list of market metadata dicts containing symbol, base, quote,
         status, precision, and min_notional for each trading pair.
@@ -249,19 +249,22 @@ class CryptoMarketDataProvider:
         exchange = self._get_exchange()
         markets = exchange.load_markets(reload)
         items: list[dict[str, Any]] = []
-        quote_currency = self.default_quote_currency.upper()
         for raw_symbol, market in (markets or {}).items():
             symbol = normalize_crypto_symbol(raw_symbol, self.default_quote_currency)
-            if not symbol or not symbol.upper().endswith(f"/{quote_currency}"):
+            if not symbol:
                 continue
-            if market.get("type") != "spot":
+            if not self._is_binance_spot_market(market):
                 continue
+            raw_status = str((market.get("info") or {}).get("status") or "").upper()
+            is_active = bool(market.get("active"))
+            if raw_status:
+                is_active = raw_status == "TRADING"
             items.append(
                 {
                     "symbol": symbol,
                     "base": str(market.get("base") or "").upper(),
                     "quote": str(market.get("quote") or "").upper(),
-                    "status": "active" if market.get("active") else "inactive",
+                    "status": "active" if is_active else "inactive",
                     "price_precision": int(market.get("precision", {}).get("price", 0) or 0),
                     "quantity_precision": int(market.get("precision", {}).get("amount", 0) or 0),
                     "min_notional": float(market.get("limits", {}).get("cost", {}).get("min", 0) or 0),
@@ -269,6 +272,35 @@ class CryptoMarketDataProvider:
             )
         items.sort(key=lambda item: item["symbol"])
         return items
+
+    def _normalize_quote_filter(self, quote: str | None) -> str | None:
+        value = str(quote or "").strip().upper()
+        if not value or value == "ALL":
+            return None
+        if "/" in value:
+            value = value.split("/")[-1]
+        return value
+
+    def _is_binance_spot_market(self, market: dict[str, Any]) -> bool:
+        if market.get("type") and market.get("type") != "spot":
+            return False
+        if market.get("spot") is False:
+            return False
+        info = market.get("info") or {}
+        permissions = info.get("permissions") or []
+        if permissions and "SPOT" not in {str(item).upper() for item in permissions}:
+            return False
+        permission_sets = info.get("permissionSets") or []
+        if permission_sets:
+            flattened = {
+                str(permission).upper()
+                for permission_set in permission_sets
+                if isinstance(permission_set, list)
+                for permission in permission_set
+            }
+            if flattened and "SPOT" not in flattened:
+                return False
+        return True
 
     def get_connection_health(self) -> dict[str, Any]:
         """Return retry/circuit-breaker state for the public exchange endpoints."""

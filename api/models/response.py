@@ -60,6 +60,9 @@ class CryptoQuoteResponse(BaseModel):
     """One cryptocurrency quote."""
 
     symbol: str
+    market_type: str = "spot"
+    base: str = ""
+    quote: str = ""
     price: float = 0.0
     open: float = 0.0
     high: float = 0.0
@@ -89,9 +92,15 @@ class CryptoSymbolInfoResponse(BaseModel):
     """Trading pair metadata from exchange info."""
 
     symbol: str
+    market_type: str = "spot"
     base: str = ""
     quote: str = ""
     status: str = "active"
+    contract_type: str = ""
+    delivery_date: Optional[str] = ""
+    underlying: str = ""
+    source: str = "binance"
+    updated_at: Optional[str] = None
     price_precision: int | None = 0
     quantity_precision: int | None = 0
     min_notional: float | None = 0.0
@@ -141,6 +150,20 @@ class CryptoOrderBookResponse(BaseModel):
     asks: list[list[float]] = Field(default_factory=list)
     timestamp: Optional[str] = None
     source: str = "ccxt"
+
+
+class CryptoDerivativeMetricsResponse(BaseModel):
+    """Derivative market metrics from public Binance endpoints."""
+
+    market_type: str = "spot"
+    symbol: str = ""
+    mark_price: float = 0.0
+    index_price: float = 0.0
+    funding_rate: float = 0.0
+    next_funding_time: Optional[str] = None
+    open_interest: float = 0.0
+    timestamp: Optional[str] = None
+    source: str = "binance"
 
 
 class MarketRegimeFeaturesResponse(BaseModel):

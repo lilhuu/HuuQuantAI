@@ -43,6 +43,7 @@ from api.models.response import (
     CryptoKLineResponse,
     CryptoKLinesResponse,
     CryptoOrderBookResponse,
+    CryptoDerivativeMetricsResponse,
     CryptoPaperAccountResponse,
     CryptoPaperEquityCurveResponse,
     CryptoPaperEquityPointResponse,
@@ -90,6 +91,11 @@ from core.auto_trading_engine import AutoTradingEngine
 from core.binance_testnet_executor import BinanceTestnetExecutor
 from core.audit_trail import AuditLogger, AuditSQLiteStore
 from core.crypto_market_cache import CryptoMarketCache
+from core.binance_public_market_provider import (
+    BinancePublicMarketProvider,
+    normalize_instrument_symbol,
+    normalize_market_type,
+)
 from core.crypto_market_data_provider import CryptoMarketDataProvider, normalize_crypto_symbol
 from core.crypto_paper_broker import CryptoPaperBrokerExecutor
 from core.crypto_backtest_engine import CryptoBacktestEngine
@@ -121,6 +127,13 @@ class CryptoService:
             "proxy": crypto_config.get("proxy", "") or "",
         }
         self.provider = CryptoMarketDataProvider(provider_config)
+        self.public_provider = BinancePublicMarketProvider(
+            {
+                "timeout": crypto_config.get("timeout", 10000) / 1000
+                if int(crypto_config.get("timeout", 10000) or 10000) > 100
+                else crypto_config.get("timeout", 10),
+            }
+        )
         storage_config = self.config.get("storage", {}) or {}
         sqlite_storage_path = storage_config.get("db_path") or "data/trading.db"
         self.market_cache = CryptoMarketCache(
@@ -172,8 +185,20 @@ class CryptoService:
         quote: str | None = None,
         limit: int = 0,
         offset: int = 0,
+        market_type: str = "spot",
     ) -> CryptoQuotesResponse:
+        normalized_market_type = self._normalize_market_type(market_type)
+        if normalized_market_type != "spot":
+            return await self._get_public_market_quotes(
+                normalized_market_type,
+                symbols=symbols,
+                search=search,
+                quote=quote,
+                limit=limit,
+                offset=offset,
+            )
         target_symbols = self._normalize_symbols(symbols) if symbols is not None else None
+        quote_filter = self._normalize_quote_filter(quote)
         if target_symbols is not None and len(target_symbols) == 0:
             return CryptoQuotesResponse(items=[], count=0, source="ccxt")
 
@@ -181,7 +206,7 @@ class CryptoService:
             if target_symbols:
                 rows = self.provider.fetch_quotes(target_symbols)
             else:
-                rows = self.provider.fetch_all_tickers(quote=quote)
+                rows = self.provider.fetch_all_tickers(quote=quote_filter)
             self.record_quote_snapshots(rows)
         except Exception as exc:
             if target_symbols:
@@ -189,6 +214,25 @@ class CryptoService:
                 if cached_rows:
                     items = [CryptoQuoteResponse(**row) for row in cached_rows]
                     return CryptoQuotesResponse(items=items, count=len(items), source="cache_binance")
+            else:
+                cached_rows, total = self.market_cache.get_quote_page(
+                    quote=quote_filter,
+                    search=search,
+                    limit=limit,
+                    offset=offset,
+                )
+                if cached_rows:
+                    safe_offset = max(int(offset or 0), 0)
+                    safe_limit = max(int(limit or 0), 0)
+                    items = [CryptoQuoteResponse(**row) for row in cached_rows]
+                    return CryptoQuotesResponse(
+                        items=items,
+                        count=len(items),
+                        total=total,
+                        limit=safe_limit,
+                        offset=safe_offset,
+                        source="cache_binance",
+                    )
             raise ApiError(
                 503,
                 f"Crypto market data source unavailable and no local cache is available: {exc}",
@@ -223,11 +267,24 @@ class CryptoService:
         status: str = "active",
         limit: int = 100,
         offset: int = 0,
+        market_type: str = "spot",
     ) -> CryptoSymbolListResponse:
+        normalized_market_type = self._normalize_market_type(market_type)
+        if normalized_market_type != "spot":
+            return await self._get_public_market_symbols(
+                normalized_market_type,
+                quote=quote,
+                search=search,
+                status=status,
+                limit=limit,
+                offset=offset,
+            )
+        quote_filter = self._normalize_quote_filter(quote)
         items, total = self.market_cache.get_symbols(
-            quote=quote, search=search, status=status, limit=limit, offset=offset
+            quote=quote_filter, search=search, status=status, limit=limit, offset=offset
         )
-        if total == 0:
+        should_refresh_markets = total == 0 or str(quote or "").strip().upper() == "ALL"
+        if should_refresh_markets:
             try:
                 markets = await asyncio.get_event_loop().run_in_executor(
                     None, self.provider.load_markets, False
@@ -240,7 +297,7 @@ class CryptoService:
             if markets:
                 self.market_cache.upsert_exchange_info(markets)
                 items, total = self.market_cache.get_symbols(
-                    quote=quote, search=search, status=status, limit=limit, offset=offset
+                    quote=quote_filter, search=search, status=status, limit=limit, offset=offset
                 )
         return CryptoSymbolListResponse(
             items=[CryptoSymbolInfoResponse(**item) for item in items],
@@ -250,7 +307,31 @@ class CryptoService:
             offset=offset,
         )
 
-    async def get_klines(self, symbol: str, period: str = "1h", limit: int = 200) -> CryptoKLinesResponse:
+    async def get_klines(self, symbol: str, period: str = "1h", limit: int = 200, market_type: str = "spot") -> CryptoKLinesResponse:
+        normalized_market_type = self._normalize_market_type(market_type)
+        if normalized_market_type != "spot":
+            normalized_symbol = normalize_instrument_symbol(symbol, normalized_market_type)
+            if not normalized_symbol:
+                raise ApiError(400, "symbol is required", ErrorCode.BAD_REQUEST)
+            try:
+                rows = self.public_provider.fetch_klines(normalized_market_type, normalized_symbol, period=period, limit=limit)
+            except ValueError as exc:
+                raise ApiError(400, str(exc), ErrorCode.BAD_REQUEST) from exc
+            except Exception as exc:
+                raise ApiError(
+                    503,
+                    f"Binance public market data source unavailable: {exc}",
+                    ErrorCode.INTERNAL_SERVER_ERROR,
+                ) from exc
+            items = [CryptoKLineResponse(**row) for row in rows]
+            response_period = items[0].period if items else str(period)
+            return CryptoKLinesResponse(
+                symbol=normalized_symbol,
+                period=response_period,
+                items=items,
+                count=len(items),
+                source=f"binance_{normalized_market_type}",
+            )
         normalized_symbol = normalize_crypto_symbol(symbol, self.crypto_config.get("default_quote_currency", "USDT"))
         if not normalized_symbol:
             raise ApiError(400, "symbol is required", ErrorCode.BAD_REQUEST)
@@ -286,8 +367,24 @@ class CryptoService:
             source=str(self.crypto_config.get("exchange", "binance")),
         )
 
-    async def get_orderbook(self, symbol: str, limit: int = 20) -> CryptoOrderBookResponse:
+    async def get_orderbook(self, symbol: str, limit: int = 20, market_type: str = "spot") -> CryptoOrderBookResponse:
         """Fetch current order book depth for a symbol."""
+        normalized_market_type = self._normalize_market_type(market_type)
+        if normalized_market_type != "spot":
+            normalized_symbol = normalize_instrument_symbol(symbol, normalized_market_type)
+            if not normalized_symbol:
+                raise ApiError(400, "symbol is required", ErrorCode.BAD_REQUEST)
+            try:
+                book = self.public_provider.fetch_order_book(normalized_market_type, normalized_symbol, limit=limit)
+            except ValueError as exc:
+                raise ApiError(400, str(exc), ErrorCode.BAD_REQUEST) from exc
+            except Exception as exc:
+                raise ApiError(
+                    503,
+                    f"Binance public market data source unavailable: {exc}",
+                    ErrorCode.INTERNAL_SERVER_ERROR,
+                ) from exc
+            return CryptoOrderBookResponse(**book)
         normalized_symbol = normalize_crypto_symbol(symbol, self.crypto_config.get("default_quote_currency", "USDT"))
         if not normalized_symbol:
             raise ApiError(400, "symbol is required", ErrorCode.BAD_REQUEST)
@@ -302,6 +399,150 @@ class CryptoService:
                 ErrorCode.INTERNAL_SERVER_ERROR,
             ) from exc
         return CryptoOrderBookResponse(**book)
+
+    async def get_derivative_metrics(self, market_type: str, symbol: str) -> CryptoDerivativeMetricsResponse:
+        normalized_market_type = self._normalize_market_type(market_type)
+        normalized_symbol = normalize_instrument_symbol(symbol, normalized_market_type)
+        if not normalized_symbol:
+            raise ApiError(400, "symbol is required", ErrorCode.BAD_REQUEST)
+        try:
+            metrics = self.public_provider.fetch_derivative_metrics(normalized_market_type, normalized_symbol)
+        except ValueError as exc:
+            raise ApiError(400, str(exc), ErrorCode.BAD_REQUEST) from exc
+        except Exception as exc:
+            raise ApiError(
+                503,
+                f"Binance derivative metrics source unavailable: {exc}",
+                ErrorCode.INTERNAL_SERVER_ERROR,
+            ) from exc
+        return CryptoDerivativeMetricsResponse(**metrics)
+
+    async def _get_public_market_quotes(
+        self,
+        market_type: str,
+        symbols: Optional[list[str]] = None,
+        search: str | None = None,
+        quote: str | None = None,
+        limit: int = 0,
+        offset: int = 0,
+    ) -> CryptoQuotesResponse:
+        target_symbols = (
+            [normalize_instrument_symbol(symbol, market_type) for symbol in symbols]
+            if symbols is not None
+            else None
+        )
+        target_symbols = [symbol for symbol in (target_symbols or []) if symbol] if target_symbols is not None else None
+        quote_filter = self._normalize_quote_filter(quote)
+        if target_symbols is not None and len(target_symbols) == 0:
+            return CryptoQuotesResponse(items=[], count=0, source=f"binance_{market_type}")
+        try:
+            rows = (
+                self.public_provider.fetch_quotes(market_type, target_symbols)
+                if target_symbols
+                else self.public_provider.fetch_all_tickers(market_type, quote=quote_filter)
+            )
+            self.market_cache.upsert_market_quotes(rows, market_type=market_type)
+        except Exception as exc:
+            if target_symbols:
+                cached_rows = self.market_cache.get_market_quotes(target_symbols, market_type=market_type)
+                if cached_rows:
+                    items = [CryptoQuoteResponse(**row) for row in cached_rows]
+                    return CryptoQuotesResponse(items=items, count=len(items), source=f"cache_binance_{market_type}")
+            else:
+                cached_rows, total = self.market_cache.get_market_quote_page(
+                    market_type=market_type,
+                    quote=quote_filter,
+                    search=search,
+                    limit=limit,
+                    offset=offset,
+                )
+                if cached_rows:
+                    safe_offset = max(int(offset or 0), 0)
+                    safe_limit = max(int(limit or 0), 0)
+                    items = [CryptoQuoteResponse(**row) for row in cached_rows]
+                    return CryptoQuotesResponse(
+                        items=items,
+                        count=len(items),
+                        total=total,
+                        limit=safe_limit,
+                        offset=safe_offset,
+                        source=f"cache_binance_{market_type}",
+                    )
+            raise ApiError(
+                503,
+                f"Binance public market data source unavailable and no local cache is available: {exc}",
+                ErrorCode.INTERNAL_SERVER_ERROR,
+            ) from exc
+
+        if search:
+            search_upper = search.strip().upper()
+            rows = [
+                row
+                for row in rows
+                if search_upper in str(row.get("symbol", "")).upper()
+                or search_upper in str(row.get("base", "")).upper()
+                or search_upper in str(row.get("quote", "")).upper()
+            ]
+        total = len(rows)
+        safe_offset = max(int(offset or 0), 0)
+        safe_limit = max(int(limit or 0), 0)
+        if safe_limit > 0:
+            rows = rows[safe_offset : safe_offset + safe_limit]
+        items = [CryptoQuoteResponse(**row) for row in rows]
+        return CryptoQuotesResponse(
+            items=items,
+            count=len(items),
+            total=total,
+            limit=safe_limit,
+            offset=safe_offset,
+            source=f"binance_{market_type}",
+        )
+
+    async def _get_public_market_symbols(
+        self,
+        market_type: str,
+        quote: str | None = None,
+        search: str | None = None,
+        status: str = "active",
+        limit: int = 100,
+        offset: int = 0,
+    ) -> CryptoSymbolListResponse:
+        quote_filter = self._normalize_quote_filter(quote)
+        items, total = self.market_cache.get_instruments(
+            market_type=market_type,
+            quote=quote_filter,
+            search=search,
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+        if total == 0 or str(quote or "").strip().upper() == "ALL":
+            try:
+                markets = await asyncio.get_event_loop().run_in_executor(
+                    None, self.public_provider.load_markets, market_type
+                )
+            except Exception:
+                try:
+                    markets = self.public_provider.load_markets(market_type)
+                except Exception:
+                    markets = []
+            if markets:
+                self.market_cache.upsert_instruments(markets, market_type=market_type)
+                items, total = self.market_cache.get_instruments(
+                    market_type=market_type,
+                    quote=quote_filter,
+                    search=search,
+                    status=status,
+                    limit=limit,
+                    offset=offset,
+                )
+        return CryptoSymbolListResponse(
+            items=[CryptoSymbolInfoResponse(**item) for item in items],
+            count=len(items),
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
 
     async def detect_market_regime(
         self,
@@ -1003,6 +1244,13 @@ class CryptoService:
 
     def record_quote_snapshots(self, rows: list[dict[str, Any]]) -> None:
         self.market_cache.upsert_quotes(rows)
+        market_rows: dict[str, list[dict[str, Any]]] = {}
+        for row in rows or []:
+            market_type = str(row.get("market_type") or "spot")
+            if market_type != "spot":
+                market_rows.setdefault(market_type, []).append(row)
+        for market_type, group in market_rows.items():
+            self.market_cache.upsert_market_quotes(group, market_type=market_type)
 
     def record_klines(self, rows: list[dict[str, Any]]) -> None:
         self.market_cache.upsert_klines(rows)
@@ -1373,3 +1621,17 @@ class CryptoService:
             if item and item not in normalized:
                 normalized.append(item)
         return normalized
+
+    def _normalize_quote_filter(self, quote: str | None) -> str | None:
+        value = str(quote or "").strip().upper()
+        if not value or value == "ALL":
+            return None
+        if "/" in value:
+            value = value.split("/")[-1]
+        return value
+
+    def _normalize_market_type(self, market_type: str | None) -> str:
+        try:
+            return normalize_market_type(market_type)
+        except ValueError as exc:
+            raise ApiError(400, str(exc), ErrorCode.BAD_REQUEST) from exc
