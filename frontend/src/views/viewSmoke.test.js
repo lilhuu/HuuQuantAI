@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { shallowMount } from "@vue/test-utils";
+import { flushPromises, shallowMount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 
 import { apiClient } from "../lib/api";
@@ -183,6 +183,59 @@ describe("view smoke tests", () => {
 
     expect(wrapper.text()).toContain("这个风控阻断是什么意思？");
     expect(wrapper.text()).not.toContain("为什么自动交易没有下单？");
+    wrapper.unmount();
+  });
+
+  it("enables the full AI advisor composer after typing and restores the draft after a failed send", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const aiChat = useAiChatStore();
+    const sendMessage = vi.spyOn(aiChat, "sendMessage").mockRejectedValueOnce(new Error("AI timeout"));
+    const component = (await viewModules.AiAdvisorView()).default;
+
+    const wrapper = shallowMount(component, {
+      global: {
+        plugins: [pinia],
+        stubs: { CryptoKlineChart: true },
+      },
+    });
+
+    const input = wrapper.find('[data-ai-copilot-input="message"]');
+    const sendButton = wrapper.find('[data-ai-copilot-send="message"]');
+    expect(sendButton.attributes("disabled")).toBeDefined();
+
+    await input.setValue("分析 DOGE");
+
+    expect(wrapper.find('[data-ai-copilot-count="message"]').text()).toBe("7/500");
+    expect(wrapper.find('[data-ai-copilot-send="message"]').attributes("disabled")).toBeUndefined();
+
+    await wrapper.find('[data-ai-copilot-send="message"]').trigger("click");
+    await flushPromises();
+
+    expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({ message: "分析 DOGE" }));
+    expect(input.element.value).toBe("分析 DOGE");
+    wrapper.unmount();
+  });
+
+  it("enables the AI chat drawer composer after typing", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const aiChat = useAiChatStore();
+    aiChat.drawerOpen = true;
+
+    const wrapper = shallowMount(AiChatDrawer, {
+      global: {
+        plugins: [pinia],
+        stubs: { Teleport: true },
+      },
+    });
+
+    expect(wrapper.find('[data-ai-drawer-send="message"]').attributes("disabled")).toBeDefined();
+
+    await wrapper.find('[data-ai-drawer-input="message"]').setValue("解释当前页面");
+
+    expect(wrapper.find('[data-ai-drawer-count="message"]').text()).toBe("6/500");
+    expect(wrapper.find('[data-ai-drawer-send="message"]').attributes("disabled")).toBeUndefined();
     wrapper.unmount();
   });
 

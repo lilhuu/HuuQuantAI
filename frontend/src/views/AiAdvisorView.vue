@@ -35,6 +35,7 @@ const modelOptions = [
 ];
 const historyFilters = ["all", "HOLD", "BUY", "SELL"];
 const watchedSymbols = ["BTC/USDT", "ETH/USDT", "DOGE/USDT", "SOL/USDT"];
+const CHAT_DRAFT_LIMIT = 500;
 
 const pairOptions = computed(() => {
   const base = [...watchedSymbols, ...trading.cryptoWatchSymbols];
@@ -52,6 +53,7 @@ const selectedQuote = computed(
 );
 const canCreatePaperOrder = computed(() => signal.value?.approval_status === "approved");
 const canSend = computed(() => draft.value.trim().length > 0 && !aiChat.loading);
+const draftLength = computed(() => draft.value.length);
 
 const priceValue = computed(() => Number(selectedQuote.value?.price || latestCandle.value?.close || 0));
 const highValue = computed(() => Math.max(...candles.value.map((item) => Number(item.high || 0)), priceValue.value));
@@ -207,17 +209,22 @@ async function createPaperOrder() {
 
 async function sendChat() {
   if (!canSend.value) return;
-  const message = draft.value;
+  const message = draft.value.trim();
   draft.value = "";
-  await aiChat.sendMessage({
-    message,
-    symbol: form.symbol,
-    period: form.period,
-    limit: Number(form.limit || 120),
-    include_context: true,
-    model: selectedModel.value,
-  });
-  scrollChat();
+  try {
+    await aiChat.sendMessage({
+      message,
+      symbol: form.symbol,
+      period: form.period,
+      limit: Number(form.limit || 120),
+      include_context: true,
+      model: selectedModel.value,
+    });
+  } catch (error) {
+    draft.value = message;
+  } finally {
+    scrollChat();
+  }
 }
 
 function scrollChat() {
@@ -233,6 +240,10 @@ function handleChatKeydown(event) {
     event.preventDefault();
     sendChat();
   }
+}
+
+function syncDraft(event) {
+  draft.value = String(event?.target?.value || "").slice(0, CHAT_DRAFT_LIMIT);
 }
 
 function badgeClass(status) {
@@ -605,13 +616,17 @@ onMounted(() => {
         <footer class="cq-copilot-composer">
           <textarea
             v-model="draft"
+            data-ai-copilot-input="message"
+            :maxlength="CHAT_DRAFT_LIMIT"
             rows="3"
             placeholder="询问 K 线、账户、持仓、风控、回测等问题..."
+            @input="syncDraft"
+            @compositionend="syncDraft"
             @keydown="handleChatKeydown"
           ></textarea>
           <div class="cq-copilot-actions">
-            <span>0/500</span>
-            <button class="cq-primary-button" :disabled="!canSend" @click="sendChat">
+            <span data-ai-copilot-count="message">{{ draftLength }}/{{ CHAT_DRAFT_LIMIT }}</span>
+            <button class="cq-primary-button" data-ai-copilot-send="message" :disabled="!canSend" @click="sendChat">
               {{ aiChat.loading ? "分析中" : "发送" }}
             </button>
           </div>

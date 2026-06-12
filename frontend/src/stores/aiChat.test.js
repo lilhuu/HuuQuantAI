@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 
 import { apiClient } from "../lib/api";
-import { useAiChatStore } from "./aiChat";
+import { AI_CHAT_TIMEOUT_MS, useAiChatStore } from "./aiChat";
 
 describe("aiChat store", () => {
   beforeEach(() => {
@@ -28,14 +28,18 @@ describe("aiChat store", () => {
     expect(response.session.session_id).toBe("AICHAT_1");
     expect(store.currentSession.session_id).toBe("AICHAT_1");
     expect(store.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
-    expect(apiClient.post).toHaveBeenCalledWith("/crypto/ai/chat", {
-      session_id: null,
-      message: "分析 BTC",
-      symbol: "BTC/USDT",
-      period: "1h",
-      limit: 120,
-      include_context: true,
-    });
+    expect(apiClient.post).toHaveBeenCalledWith(
+      "/crypto/ai/chat",
+      {
+        session_id: null,
+        message: "分析 BTC",
+        symbol: "BTC/USDT",
+        period: "1h",
+        limit: 120,
+        include_context: true,
+      },
+      expect.objectContaining({ timeout: AI_CHAT_TIMEOUT_MS }),
+    );
   });
 
   it("loads and deletes the current chat session", async () => {
@@ -80,6 +84,7 @@ describe("aiChat store", () => {
     expect(apiClient.post).toHaveBeenCalledWith(
       "/crypto/ai/chat",
       expect.objectContaining({ model: "deepseek-v4-pro" }),
+      expect.objectContaining({ timeout: AI_CHAT_TIMEOUT_MS }),
     );
   });
 
@@ -111,6 +116,7 @@ describe("aiChat store", () => {
         current_view_title: "风控中心",
         visible_context: { risk_state: "blocked" },
       }),
+      expect.objectContaining({ timeout: AI_CHAT_TIMEOUT_MS }),
     );
   });
 
@@ -138,7 +144,38 @@ describe("aiChat store", () => {
         guide_mode: true,
         user_goal: "strategy_backtest",
       }),
+      expect.objectContaining({ timeout: AI_CHAT_TIMEOUT_MS }),
     );
+  });
+
+  it("keeps the assistant reply when session refresh fails", async () => {
+    vi.spyOn(apiClient, "post").mockResolvedValueOnce({
+      data: {
+        session: { session_id: "AICHAT_REFRESH", title: "refresh", message_count: 2 },
+        user_message: { message_id: "U_REFRESH", role: "user", content: "分析 SOL" },
+        assistant_message: { message_id: "A_REFRESH", role: "assistant", content: "SOL 模拟分析" },
+      },
+    });
+    vi.spyOn(apiClient, "get").mockRejectedValueOnce(new Error("session refresh failed"));
+
+    const store = useAiChatStore();
+    const response = await store.sendMessage({ message: "分析 SOL", symbol: "SOL/USDT" });
+
+    expect(response.session.session_id).toBe("AICHAT_REFRESH");
+    expect(store.messages.map((message) => message.message_id)).toEqual(["U_REFRESH", "A_REFRESH"]);
+    expect(store.errorMessage).toBe("");
+  });
+
+  it("recovers loading state and shows an AI-specific timeout message", async () => {
+    vi.spyOn(apiClient, "post").mockRejectedValueOnce({ code: "ECONNABORTED" });
+
+    const store = useAiChatStore();
+    await expect(store.sendMessage({ message: "分析 DOGE", symbol: "DOGE/USDT" })).rejects.toMatchObject({
+      code: "ECONNABORTED",
+    });
+
+    expect(store.loading).toBe(false);
+    expect(store.errorMessage).toContain("AI 助手响应超时");
   });
 
   it("keeps safe action cards from the latest assistant context", async () => {

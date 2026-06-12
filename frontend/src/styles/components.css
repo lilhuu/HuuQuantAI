@@ -951,6 +951,14 @@ th {
   flex-wrap: wrap;
 }
 
+.ai-chat-draft-count {
+  margin-right: auto;
+  color: #7f8498;
+  font-size: 0.78rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
 .ai-chat-model-switch {
   display: inline-flex;
   align-items: center;

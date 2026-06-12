@@ -4,6 +4,8 @@ import { defineStore } from "pinia";
 import { apiClient, extractApiError } from "../lib/api";
 import { normalizeCryptoSymbol } from "../lib/tradingUtils";
 
+export const AI_CHAT_TIMEOUT_MS = 45000;
+
 export const useAiChatStore = defineStore("ai-chat", () => {
   const drawerOpen = ref(false);
   const loading = ref(false);
@@ -50,21 +52,25 @@ export const useAiChatStore = defineStore("ai-chat", () => {
     loading.value = true;
     errorMessage.value = "";
     try {
-      const { data } = await apiClient.post("/crypto/ai/chat", {
-        session_id: currentSession.value?.session_id || null,
-        message,
-        ...(payload.model ? { model: payload.model } : {}),
-        ...(payload.current_route ? { current_route: payload.current_route } : {}),
-        ...(payload.current_module ? { current_module: payload.current_module } : {}),
-        ...(payload.current_view_title ? { current_view_title: payload.current_view_title } : {}),
-        ...(payload.visible_context ? { visible_context: payload.visible_context } : {}),
-        ...(typeof payload.guide_mode === "boolean" ? { guide_mode: payload.guide_mode } : {}),
-        ...(payload.user_goal ? { user_goal: payload.user_goal } : {}),
-        symbol: normalizeCryptoSymbol(payload.symbol || "BTC/USDT"),
-        period: payload.period || "1h",
-        limit: Number(payload.limit || 120),
-        include_context: payload.include_context !== false,
-      });
+      const { data } = await apiClient.post(
+        "/crypto/ai/chat",
+        {
+          session_id: currentSession.value?.session_id || null,
+          message,
+          ...(payload.model ? { model: payload.model } : {}),
+          ...(payload.current_route ? { current_route: payload.current_route } : {}),
+          ...(payload.current_module ? { current_module: payload.current_module } : {}),
+          ...(payload.current_view_title ? { current_view_title: payload.current_view_title } : {}),
+          ...(payload.visible_context ? { visible_context: payload.visible_context } : {}),
+          ...(typeof payload.guide_mode === "boolean" ? { guide_mode: payload.guide_mode } : {}),
+          ...(payload.user_goal ? { user_goal: payload.user_goal } : {}),
+          symbol: normalizeCryptoSymbol(payload.symbol || "BTC/USDT"),
+          period: payload.period || "1h",
+          limit: Number(payload.limit || 120),
+          include_context: payload.include_context !== false,
+        },
+        { timeout: AI_CHAT_TIMEOUT_MS },
+      );
       currentSession.value = data.session;
       const assistantMessage = data.assistant_message
         ? {
@@ -73,10 +79,13 @@ export const useAiChatStore = defineStore("ai-chat", () => {
           }
         : null;
       messages.value = [...messages.value, data.user_message, assistantMessage].filter(Boolean);
-      await fetchSessions();
+      fetchSessions().catch(() => {});
       return data;
     } catch (error) {
-      errorMessage.value = extractApiError(error) || "AI 对话请求失败";
+      errorMessage.value =
+        error?.code === "ECONNABORTED"
+          ? "AI 助手响应超时，请稍后重试，或切换 Flash 模型后再发送。"
+          : extractApiError(error) || "AI 对话请求失败";
       throw error;
     } finally {
       loading.value = false;

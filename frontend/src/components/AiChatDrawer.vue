@@ -28,6 +28,7 @@ const guideMode = ref(false);
 const selectedGuideGoal = ref("");
 const selectedModel = ref("deepseek-v4-flash");
 const messageList = ref(null);
+const CHAT_DRAFT_LIMIT = 500;
 
 const periodOptions = ["1m", "5m", "15m", "1h", "4h", "1d"];
 const modelOptions = [
@@ -105,6 +106,7 @@ const pairOptions = computed(() => {
 });
 
 const canSend = computed(() => draft.value.trim().length > 0 && !aiChat.loading);
+const draftLength = computed(() => draft.value.length);
 const currentRoutePath = computed(() => route.path || "/");
 const currentModule = computed(() => routeModuleMap[currentRoutePath.value] || "");
 const currentViewTitle = computed(() => route.meta?.title || route.name || "HuuQuantAI");
@@ -160,13 +162,13 @@ function scrollToBottom() {
 function useSuggestedQuestion(question) {
   guideMode.value = false;
   selectedGuideGoal.value = "";
-  draft.value = question;
+  draft.value = String(question || "").slice(0, CHAT_DRAFT_LIMIT);
 }
 
 function useGuideAction(action) {
   guideMode.value = true;
   selectedGuideGoal.value = String(action || "").trim();
-  draft.value = selectedGuideGoal.value;
+  draft.value = selectedGuideGoal.value.slice(0, CHAT_DRAFT_LIMIT);
 }
 
 function handleActionCard(card) {
@@ -182,7 +184,10 @@ function handleActionCard(card) {
   if (actionType === "explain" || actionType === "inspect") {
     guideMode.value = true;
     selectedGuideGoal.value = String(card?.title || "解释当前页面");
-    draft.value = `${selectedGuideGoal.value}：${String(card?.description || "请结合当前页面状态说明。")}`;
+    draft.value = `${selectedGuideGoal.value}：${String(card?.description || "请结合当前页面状态说明。")}`.slice(
+      0,
+      CHAT_DRAFT_LIMIT,
+    );
   }
 }
 
@@ -190,23 +195,28 @@ async function send() {
   if (!canSend.value) {
     return;
   }
-  const message = draft.value;
+  const message = draft.value.trim();
   draft.value = "";
-  await aiChat.sendMessage({
-    message,
-    symbol: symbol.value,
-    period: period.value,
-    limit: limit.value,
-    include_context: includeContext.value,
-    model: selectedModel.value,
-    current_route: currentRoutePath.value,
-    current_module: currentModule.value,
-    current_view_title: String(currentViewTitle.value || ""),
-    visible_context: visibleContext.value,
-    guide_mode: guideMode.value,
-    user_goal: guideMode.value ? selectedGuideGoal.value || message : "",
-  });
-  scrollToBottom();
+  try {
+    await aiChat.sendMessage({
+      message,
+      symbol: symbol.value,
+      period: period.value,
+      limit: limit.value,
+      include_context: includeContext.value,
+      model: selectedModel.value,
+      current_route: currentRoutePath.value,
+      current_module: currentModule.value,
+      current_view_title: String(currentViewTitle.value || ""),
+      visible_context: visibleContext.value,
+      guide_mode: guideMode.value,
+      user_goal: guideMode.value ? selectedGuideGoal.value || message : "",
+    });
+  } catch (error) {
+    draft.value = message;
+  } finally {
+    scrollToBottom();
+  }
 }
 
 function handleKeydown(event) {
@@ -214,6 +224,10 @@ function handleKeydown(event) {
     event.preventDefault();
     send();
   }
+}
+
+function syncDraft(event) {
+  draft.value = String(event?.target?.value || "").slice(0, CHAT_DRAFT_LIMIT);
 }
 
 watch(
@@ -364,11 +378,16 @@ watch(
             <footer class="ai-chat-composer">
               <textarea
                 v-model="draft"
+                data-ai-drawer-input="message"
+                :maxlength="CHAT_DRAFT_LIMIT"
                 rows="3"
                 placeholder="例如：这个页面怎么用？为什么这里没有下单？这个风控阻断是什么意思？"
+                @input="syncDraft"
+                @compositionend="syncDraft"
                 @keydown="handleKeydown"
               ></textarea>
               <div class="ai-chat-actions">
+                <span class="ai-chat-draft-count" data-ai-drawer-count="message">{{ draftLength }}/{{ CHAT_DRAFT_LIMIT }}</span>
                 <div class="ai-chat-model-switch" aria-label="模型选择">
                   <button
                     v-for="option in modelOptions"
@@ -388,7 +407,7 @@ watch(
                 >
                   删除会话
                 </button>
-                <button class="cq-primary-button" :disabled="!canSend" @click="send">
+                <button class="cq-primary-button" data-ai-drawer-send="message" :disabled="!canSend" @click="send">
                   {{ aiChat.loading ? "思考中" : "发送" }}
                 </button>
               </div>
