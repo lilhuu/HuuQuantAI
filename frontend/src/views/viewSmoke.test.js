@@ -7,6 +7,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { apiClient } from "../lib/api";
 import AiChatDrawer from "../components/AiChatDrawer.vue";
 import FeatureCommandView from "../components/FeatureCommandView.vue";
+import WorkbenchLayout from "../layouts/WorkbenchLayout.vue";
 import { useAiAdvisorStore } from "../stores/aiAdvisor";
 import { useAutoTradingStore } from "../stores/autoTrading";
 import { useMarketStore } from "../stores/market";
@@ -186,6 +187,40 @@ describe("view smoke tests", () => {
     wrapper.unmount();
   });
 
+  it("renders the AI copilot as a persistent workbench rail and toggles it from the topbar", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const aiChat = useAiChatStore();
+    aiChat.drawerOpen = true;
+
+    const wrapper = shallowMount(WorkbenchLayout, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          RouterView: true,
+          RouterLink: {
+            props: ["to", "custom"],
+            template: '<a :href="typeof to === `string` ? to : `/`"><slot :href="typeof to === `string` ? to : `/`" /></a>',
+          },
+          AiChatDrawer: {
+            props: ["surface"],
+            template: '<aside class="ai-chat-drawer-stub" :data-surface="surface">AI rail</aside>',
+          },
+        },
+      },
+    });
+
+    expect(wrapper.find("[data-copilot-rail]").exists()).toBe(true);
+    expect(wrapper.find(".ai-chat-drawer-stub").attributes("data-surface")).toBe("rail");
+    expect(wrapper.find('[data-copilot-toggle="rail"]').attributes("aria-pressed")).toBe("true");
+
+    await wrapper.find('[data-copilot-toggle="rail"]').trigger("click");
+
+    expect(aiChat.drawerOpen).toBe(false);
+    expect(wrapper.find("[data-copilot-rail]").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("enables the full AI advisor composer after typing and restores the draft after a failed send", async () => {
     const pinia = createPinia();
     setActivePinia(pinia);
@@ -236,6 +271,42 @@ describe("view smoke tests", () => {
 
     expect(wrapper.find('[data-ai-drawer-count="message"]').text()).toBe("6/500");
     expect(wrapper.find('[data-ai-drawer-send="message"]').attributes("disabled")).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it("sends route-aware copilot context from the current feature block", async () => {
+    routeState.current = { path: "/auto", name: "auto", query: {}, meta: { title: "自动交易" } };
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const aiChat = useAiChatStore();
+    aiChat.drawerOpen = true;
+    const sendMessage = vi.spyOn(aiChat, "sendMessage").mockResolvedValueOnce({ success: true });
+
+    const wrapper = shallowMount(AiChatDrawer, {
+      props: { surface: "rail" },
+      global: {
+        plugins: [pinia],
+      },
+    });
+
+    await wrapper.find('[data-ai-drawer-input="message"]').setValue("为什么没有下单？");
+    await wrapper.find('[data-ai-drawer-send="message"]').trigger("click");
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        current_route: "/auto",
+        current_module: "auto_trade",
+        current_view_title: "自动交易",
+        visible_context: expect.objectContaining({
+          route: "/auto",
+          module: "auto_trade",
+          selected_symbol: expect.any(String),
+          automation: expect.objectContaining({
+            state: expect.any(String),
+          }),
+        }),
+      }),
+    );
     wrapper.unmount();
   });
 

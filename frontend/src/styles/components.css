@@ -988,3 +988,117 @@ th {
   color: #f3f4ff;
   background: rgba(255, 255, 255, 0.06);
 }
+
+.ai-chat-rail-shell {
+  height: 100%;
+  min-height: 0;
+}
+
+.ai-chat-drawer--rail {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background:
+    linear-gradient(180deg, rgba(80, 68, 180, 0.1), transparent 24%),
+    #090a10;
+}
+
+.ai-chat-drawer--overlay {
+  margin-left: auto;
+}
+
+.ai-chat-header small {
+  display: block;
+  margin-top: 4px;
+  color: #9da6ba;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ai-chat-context-bar {
+  display: grid;
+  gap: 4px;
+  margin: 0 18px 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(116, 96, 255, 0.28);
+  border-radius: 12px;
+  background: rgba(116, 96, 255, 0.1);
+}
+
+.ai-chat-context-bar strong {
+  color: #f5f6ff;
+  font-size: 14px;
+}
+
+.ai-chat-context-bar span,
+.ai-chat-context-bar small,
+.ai-chat-context-notice {
+  color: #aeb8cc;
+  font-size: 12px;
+}
+
+.ai-chat-context-notice {
+  margin: -4px 20px 10px;
+  color: #14d9d2;
+  font-weight: 800;
+}
+
+.ai-chat-drawer--rail .ai-chat-header {
+  padding: 18px 18px 14px;
+}
+
+.ai-chat-drawer--rail .ai-chat-body {
+  grid-template-columns: 1fr;
+}
+
+.ai-chat-drawer--rail .ai-chat-sessions {
+  max-height: 138px;
+  border-right: 0;
+  border-bottom: 1px solid #252531;
+}
+
+.ai-chat-drawer--rail .ai-chat-session-list {
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(180px, 1fr);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.ai-chat-drawer--rail .ai-chat-context {
+  grid-template-columns: minmax(140px, 1fr) 86px 84px;
+}
+
+.ai-chat-drawer--rail .ai-chat-toggle {
+  grid-column: span 3;
+}
+
+.ai-chat-drawer--rail .ai-chat-message,
+.ai-chat-drawer--rail .ai-chat-welcome,
+.ai-chat-drawer--rail .ai-chat-action-cards {
+  max-width: none;
+  width: 100%;
+}
+
+.ai-chat-drawer--rail .ai-chat-actions {
+  justify-content: stretch;
+}
+
+.ai-chat-drawer--rail .ai-chat-model-switch {
+  margin-left: auto;
+}
+
+@media (max-width: 760px) {
+  .ai-chat-drawer--rail .ai-chat-context {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-chat-drawer--rail .ai-chat-toggle {
+    grid-column: auto;
+  }
+
+  .ai-chat-drawer--rail .ai-chat-actions > button,
+  .ai-chat-drawer--rail .ai-chat-model-switch {
+    flex: 1 1 100%;
+  }
+}

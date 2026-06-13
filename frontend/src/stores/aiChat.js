@@ -7,7 +7,7 @@ import { normalizeCryptoSymbol } from "../lib/tradingUtils";
 export const AI_CHAT_TIMEOUT_MS = 45000;
 
 export const useAiChatStore = defineStore("ai-chat", () => {
-  const drawerOpen = ref(false);
+  const drawerOpen = ref(true);
   const loading = ref(false);
   const loadingSessions = ref(false);
   const errorMessage = ref("");

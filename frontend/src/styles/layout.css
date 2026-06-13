@@ -1495,6 +1495,54 @@ body,
   font-weight: 900;
 }
 
+/* Persistent project copilot rail. */
+.cq-shell--copilot-open {
+  grid-template-columns: 232px minmax(0, 1fr) minmax(420px, 440px);
+}
+
+.cq-copilot-rail {
+  position: sticky;
+  top: 0;
+  z-index: 16;
+  height: 100vh;
+  min-width: 0;
+  border-left: 1px solid rgba(104, 116, 150, 0.22);
+  background: #07080d;
+}
+
+.cq-user-button.active {
+  border-color: rgba(116, 96, 255, 0.55);
+  background: rgba(83, 60, 205, 0.42);
+}
+
+@media (max-width: 1380px) {
+  .cq-shell--copilot-open {
+    grid-template-columns: 184px minmax(0, 1fr);
+  }
+
+  .cq-copilot-rail {
+    position: fixed;
+    right: 14px;
+    top: 14px;
+    bottom: 14px;
+    z-index: 80;
+    width: min(460px, calc(100vw - 28px));
+    height: auto;
+    border: 1px solid rgba(104, 116, 150, 0.28);
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.48);
+  }
+}
+
+@media (max-width: 760px) {
+  .cq-copilot-rail {
+    inset: 0;
+    width: 100vw;
+    border-radius: 0;
+  }
+}
+
 .cq-error {
   align-items: center;
   border-color: rgba(255, 107, 107, 0.34);

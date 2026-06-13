@@ -33,17 +33,17 @@ const {
 
 const navItems = [
   { label: "仪表盘", icon: "grid", to: "/" },
-  { label: "市场分析", icon: "trend", to: "/market" },
+  { label: "市场行情", icon: "trend", to: "/market" },
   { label: "手动交易", icon: "clock", to: "/trade" },
   { label: "自动交易", icon: "target", to: "/auto" },
   { label: "AI 助手", icon: "target", to: "/ai" },
-  { label: "策略验证", icon: "flask", to: "/strategy" },
+  { label: "策略中心", icon: "flask", to: "/strategy" },
   { label: "回测中心", icon: "audit", to: "/backtest" },
   { label: "投资组合", icon: "wallet", to: "/portfolio" },
   { label: "账户状态", icon: "wallet", to: "/account" },
-  { label: "执行可靠性", icon: "shield", to: "/risk" },
-  { label: "监控审计", icon: "audit", to: "/audit" },
-  { label: "策略诊断", icon: "target", to: "/diagnostics" },
+  { label: "风控中心", icon: "shield", to: "/risk" },
+  { label: "审计日志", icon: "audit", to: "/audit" },
+  { label: "诊断中心", icon: "target", to: "/diagnostics" },
   { label: "系统设置", icon: "settings", to: "/settings" },
 ];
 
@@ -132,6 +132,14 @@ function navigateSidebar(item) {
   });
 }
 
+function toggleCopilot() {
+  if (aiChat.drawerOpen) {
+    aiChat.closeDrawer();
+    return;
+  }
+  aiChat.openDrawer();
+}
+
 function formatTopPrice(value) {
   const number = Number(value || 0);
   if (!Number.isFinite(number) || number <= 0) return "--";
@@ -148,7 +156,7 @@ function formatTopVolume(value) {
 </script>
 
 <template>
-  <div class="cq-shell">
+  <div class="cq-shell" :class="{ 'cq-shell--copilot-open': aiChat.drawerOpen }">
     <aside class="cq-sidebar">
       <div class="cq-brand">
         <div class="cq-brand__mark" aria-hidden="true">
@@ -161,13 +169,7 @@ function formatTopVolume(value) {
       </div>
 
       <nav class="cq-nav" aria-label="主功能栏">
-        <RouterLink
-          v-for="item in navItems"
-          :key="`${item.label}-${item.to}`"
-          :to="item.to"
-          custom
-          v-slot="{ href }"
-        >
+        <RouterLink v-for="item in navItems" :key="`${item.label}-${item.to}`" :to="item.to" custom v-slot="{ href }">
           <a
             :href="href"
             class="cq-nav__item"
@@ -249,9 +251,12 @@ function formatTopVolume(value) {
           </div>
           <button
             class="cq-icon-button cq-user-button"
-            :title="`打开 AI 助手：${authStore.user?.username || 'admin'}`"
-            aria-label="打开 AI 助手"
-            @click="aiChat.openDrawer()"
+            data-copilot-toggle="rail"
+            :class="{ active: aiChat.drawerOpen }"
+            :title="`${aiChat.drawerOpen ? '收起' : '打开'} AI 助手：${authStore.user?.username || 'admin'}`"
+            aria-label="切换 AI 助手"
+            :aria-pressed="String(aiChat.drawerOpen)"
+            @click="toggleCopilot"
           >
             <span aria-hidden="true">AI</span>
           </button>
@@ -273,6 +278,8 @@ function formatTopVolume(value) {
       </main>
     </section>
 
-    <AiChatDrawer />
+    <aside v-if="aiChat.drawerOpen" class="cq-copilot-rail" data-copilot-rail>
+      <AiChatDrawer surface="rail" />
+    </aside>
   </div>
 </template>
