@@ -274,6 +274,26 @@ describe("view smoke tests", () => {
     wrapper.unmount();
   });
 
+  it("keeps the persistent AI rail compact with collapsed settings and no session column", () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const aiChat = useAiChatStore();
+    aiChat.drawerOpen = true;
+
+    const wrapper = shallowMount(AiChatDrawer, {
+      props: { surface: "rail" },
+      global: {
+        plugins: [pinia],
+      },
+    });
+
+    expect(wrapper.find(".ai-chat-sessions").exists()).toBe(false);
+    expect(wrapper.find(".ai-chat-header-action").text()).toContain("新对话");
+    expect(wrapper.find('[data-ai-chat-settings]').attributes("open")).toBeUndefined();
+    expect(wrapper.find('[data-ai-drawer-send="message"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
   it("sends route-aware copilot context from the current feature block", async () => {
     routeState.current = { path: "/auto", name: "auto", query: {}, meta: { title: "自动交易" } };
     const pinia = createPinia();

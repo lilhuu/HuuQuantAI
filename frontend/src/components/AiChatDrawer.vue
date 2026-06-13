@@ -192,12 +192,17 @@ watch(
   <div v-if="aiChat.drawerOpen" :class="shellClass" @click.self="handleShellClick">
     <aside :class="panelClass" aria-label="AI 项目副驾驶">
       <header class="ai-chat-header">
-        <div>
+        <div class="ai-chat-title">
           <span>AI 对话助手</span>
           <strong>量化副驾驶</strong>
           <small>AI 只做建议、解释和引导，不能直接下单</small>
         </div>
-        <button class="cq-icon-button" title="关闭 AI 助手" aria-label="关闭 AI 助手" @click="aiChat.closeDrawer()">×</button>
+        <div class="ai-chat-header-actions">
+          <button v-if="isRail" class="cq-outline-button ai-chat-header-action" type="button" @click="aiChat.startNewSession()">
+            新对话
+          </button>
+          <button class="cq-icon-button" title="关闭 AI 助手" aria-label="关闭 AI 助手" @click="aiChat.closeDrawer()">×</button>
+        </div>
       </header>
 
       <section class="ai-chat-context-bar" aria-label="当前助手上下文">
@@ -208,7 +213,7 @@ watch(
       <p v-if="contextNotice" class="ai-chat-context-notice">{{ contextNotice }}</p>
 
       <section class="ai-chat-body">
-        <aside class="ai-chat-sessions">
+        <aside v-if="!isRail" class="ai-chat-sessions">
           <button class="cq-primary-button ai-chat-new" @click="aiChat.startNewSession()">新对话</button>
           <div class="ai-chat-session-list">
             <button
@@ -226,32 +231,38 @@ watch(
         </aside>
 
         <main class="ai-chat-main">
-          <div class="ai-chat-context">
-            <label>
-              <span>交易对</span>
-              <select v-model="symbol">
-                <option v-for="item in pairOptions" :key="item" :value="item">{{ item }}</option>
-              </select>
-            </label>
-            <label>
-              <span>周期</span>
-              <select v-model="period">
-                <option v-for="item in periodOptions" :key="item" :value="item">{{ item }}</option>
-              </select>
-            </label>
-            <label>
-              <span>K 线</span>
-              <input v-model.number="limit" type="number" min="30" max="500" step="10" />
-            </label>
-            <label class="ai-chat-toggle">
-              <input v-model="includeContext" type="checkbox" />
-              <span>带项目和行情上下文</span>
-            </label>
-            <label class="ai-chat-toggle">
-              <input v-model="guideMode" type="checkbox" />
-              <span>引导模式</span>
-            </label>
-          </div>
+          <details class="ai-chat-settings" :open="!isRail" data-ai-chat-settings>
+            <summary>
+              <span>上下文设置</span>
+              <strong>{{ symbol }} · {{ period }} · {{ selectedModel.includes("pro") ? "Pro" : "Flash" }}</strong>
+            </summary>
+            <div class="ai-chat-context">
+              <label>
+                <span>交易对</span>
+                <select v-model="symbol">
+                  <option v-for="item in pairOptions" :key="item" :value="item">{{ item }}</option>
+                </select>
+              </label>
+              <label>
+                <span>周期</span>
+                <select v-model="period">
+                  <option v-for="item in periodOptions" :key="item" :value="item">{{ item }}</option>
+                </select>
+              </label>
+              <label>
+                <span>K 线</span>
+                <input v-model.number="limit" type="number" min="30" max="500" step="10" />
+              </label>
+              <label class="ai-chat-toggle">
+                <input v-model="includeContext" type="checkbox" />
+                <span>带项目和行情上下文</span>
+              </label>
+              <label class="ai-chat-toggle">
+                <input v-model="guideMode" type="checkbox" />
+                <span>引导模式</span>
+              </label>
+            </div>
+          </details>
 
           <div ref="messageList" class="ai-chat-messages">
             <div v-if="!aiChat.hasMessages" class="ai-chat-welcome">

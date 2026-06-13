@@ -1497,14 +1497,14 @@ body,
 
 /* Persistent project copilot rail. */
 .cq-shell--copilot-open {
-  grid-template-columns: 232px minmax(0, 1fr) minmax(420px, 440px);
+  grid-template-columns: 232px minmax(0, 1fr) minmax(400px, 420px);
 }
 
 .cq-copilot-rail {
   position: sticky;
   top: 0;
   z-index: 16;
-  height: 100vh;
+  height: 100dvh;
   min-width: 0;
   border-left: 1px solid rgba(104, 116, 150, 0.22);
   background: #07080d;
