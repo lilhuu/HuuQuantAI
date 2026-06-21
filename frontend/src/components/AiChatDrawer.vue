@@ -11,14 +11,13 @@ const props = defineProps({
   surface: {
     type: String,
     default: "overlay",
-    validator: (value) => ["overlay", "rail"].includes(value),
+    validator: (value) => ["overlay", "rail", "pet-panel"].includes(value),
   },
 });
 
 const router = useRouter();
 const aiChat = useAiChatStore();
 const trading = useTradingStore();
-
 const draft = ref("");
 const symbol = ref(normalizeCryptoSymbol(trading.selectedCryptoSymbol || "BTC/USDT"));
 const period = ref(trading.selectedCryptoPeriod || "1h");
@@ -45,32 +44,31 @@ const {
   suggestedQuestions,
   guideActions,
   visibleContext,
-} = useCopilotContext({
-  symbol,
-  period,
-  limit,
-  selectedModel,
-  includeContext,
-  guideMode,
-  selectedGuideGoal,
-});
+} = useCopilotContext({ symbol, period, limit, selectedModel, includeContext, guideMode, selectedGuideGoal });
 
 const pairOptions = computed(() => {
   const base = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "DOGE/USDT", ...(trading.cryptoWatchSymbols || [])];
   return [...new Set(base.map((item) => normalizeCryptoSymbol(item)).filter(Boolean))];
 });
-const canSend = computed(() => draft.value.trim().length > 0 && !aiChat.loading);
+const canSend = computed(() => draft.value.trim().length > 0 && !aiChat.loading && !aiChat.streaming);
 const draftLength = computed(() => draft.value.length);
+const isOverlay = computed(() => props.surface === "overlay");
 const isRail = computed(() => props.surface === "rail");
-const shellClass = computed(() => (isRail.value ? "ai-chat-rail-shell" : "ai-chat-backdrop"));
-const panelClass = computed(() => ["ai-chat-drawer", isRail.value ? "ai-chat-drawer--rail" : "ai-chat-drawer--overlay"]);
+const isPetPanel = computed(() => props.surface === "pet-panel");
+const isCompact = computed(() => !isOverlay.value);
+const shellClass = computed(() => {
+  if (isPetPanel.value) return "ai-chat-pet-shell";
+  return isRail.value ? "ai-chat-rail-shell" : "ai-chat-backdrop";
+});
+const panelClass = computed(() => [
+  "ai-chat-drawer",
+  isPetPanel.value ? "ai-chat-drawer--pet" : isRail.value ? "ai-chat-drawer--rail" : "ai-chat-drawer--overlay",
+]);
 const visibleActionCards = computed(() => aiChat.latestActionCards || []);
 
 function scrollToBottom() {
   nextTick(() => {
-    if (messageList.value) {
-      messageList.value.scrollTop = messageList.value.scrollHeight;
-    }
+    if (messageList.value) messageList.value.scrollTop = messageList.value.scrollHeight;
   });
 }
 
@@ -102,28 +100,31 @@ function handleActionCard(card) {
   }
 }
 
+function chatPayload(message) {
+  return {
+    message,
+    symbol: symbol.value,
+    period: period.value,
+    limit: limit.value,
+    include_context: includeContext.value,
+    model: selectedModel.value,
+    current_route: currentRoutePath.value,
+    current_module: currentModule.value,
+    current_view_title: String(currentViewTitle.value || ""),
+    visible_context: visibleContext.value,
+    guide_mode: guideMode.value,
+    user_goal: guideMode.value ? selectedGuideGoal.value || message : "",
+  };
+}
+
 async function send() {
-  if (!canSend.value) {
-    return;
-  }
+  if (!canSend.value) return;
   const message = draft.value.trim();
   draft.value = "";
   try {
-    await aiChat.sendMessage({
-      message,
-      symbol: symbol.value,
-      period: period.value,
-      limit: limit.value,
-      include_context: includeContext.value,
-      model: selectedModel.value,
-      current_route: currentRoutePath.value,
-      current_module: currentModule.value,
-      current_view_title: String(currentViewTitle.value || ""),
-      visible_context: visibleContext.value,
-      guide_mode: guideMode.value,
-      user_goal: guideMode.value ? selectedGuideGoal.value || message : "",
-    });
-  } catch (error) {
+    if (isPetPanel.value) await aiChat.sendMessageStream(chatPayload(message));
+    else await aiChat.sendMessage(chatPayload(message));
+  } catch {
     draft.value = message;
   } finally {
     scrollToBottom();
@@ -142,18 +143,14 @@ function syncDraft(event) {
 }
 
 function handleShellClick() {
-  if (!isRail.value) {
-    aiChat.closeDrawer();
-  }
+  if (isOverlay.value) aiChat.closeDrawer();
 }
 
 watch(
   () => trading.selectedCryptoSymbol,
   (nextSymbol) => {
     const normalized = normalizeCryptoSymbol(nextSymbol);
-    if (normalized) {
-      symbol.value = normalized;
-    }
+    if (normalized) symbol.value = normalized;
   },
 );
 
@@ -169,23 +166,18 @@ watch(
 );
 
 watch(
-  () => aiChat.messages.length,
+  () => [aiChat.messages.length, aiChat.messages.at(-1)?.content],
   () => scrollToBottom(),
 );
 
-watch(
-  currentModuleLabel,
-  (nextLabel, previousLabel) => {
-    if (previousLabel && nextLabel !== previousLabel) {
-      contextNotice.value = `上下文已切换到：${nextLabel}`;
-      window.setTimeout(() => {
-        if (contextNotice.value === `上下文已切换到：${nextLabel}`) {
-          contextNotice.value = "";
-        }
-      }, 2600);
-    }
-  },
-);
+watch(currentModuleLabel, (nextLabel, previousLabel) => {
+  if (!previousLabel || nextLabel === previousLabel) return;
+  const notice = `上下文已切换到：${nextLabel}`;
+  contextNotice.value = notice;
+  window.setTimeout(() => {
+    if (contextNotice.value === notice) contextNotice.value = "";
+  }, 2600);
+});
 </script>
 
 <template>
@@ -195,10 +187,10 @@ watch(
         <div class="ai-chat-title">
           <span>AI 对话助手</span>
           <strong>量化副驾驶</strong>
-          <small>AI 只做建议、解释和引导，不能直接下单</small>
+          <small>只做建议、解释和引导，不能直接下单</small>
         </div>
         <div class="ai-chat-header-actions">
-          <button v-if="isRail" class="cq-outline-button ai-chat-header-action" type="button" @click="aiChat.startNewSession()">
+          <button v-if="isCompact" class="cq-outline-button ai-chat-header-action" type="button" @click="aiChat.startNewSession()">
             新对话
           </button>
           <button class="cq-icon-button" title="关闭 AI 助手" aria-label="关闭 AI 助手" @click="aiChat.closeDrawer()">×</button>
@@ -213,7 +205,7 @@ watch(
       <p v-if="contextNotice" class="ai-chat-context-notice">{{ contextNotice }}</p>
 
       <section class="ai-chat-body">
-        <aside v-if="!isRail" class="ai-chat-sessions">
+        <aside v-if="isOverlay" class="ai-chat-sessions">
           <button class="cq-primary-button ai-chat-new" @click="aiChat.startNewSession()">新对话</button>
           <div class="ai-chat-session-list">
             <button
@@ -231,7 +223,7 @@ watch(
         </aside>
 
         <main class="ai-chat-main">
-          <details class="ai-chat-settings" :open="!isRail" data-ai-chat-settings>
+          <details class="ai-chat-settings" :open="isOverlay" data-ai-chat-settings>
             <summary>
               <span>上下文设置</span>
               <strong>{{ symbol }} · {{ period }} · {{ selectedModel.includes("pro") ? "Pro" : "Flash" }}</strong>
@@ -264,32 +256,19 @@ watch(
             </div>
           </details>
 
-          <div ref="messageList" class="ai-chat-messages">
+          <div ref="messageList" class="ai-chat-messages" aria-live="polite">
             <div v-if="!aiChat.hasMessages" class="ai-chat-welcome">
-              <strong>真实交易关闭，AI 是项目副驾驶，不会替你点击或下单。</strong>
-              <p>
-                可以正常聊天，也可以问项目怎么用、每个模块做什么、策略和回测如何理解、
-                风控中心为什么阻断、模拟账户和订单状态怎么看。
-              </p>
+              <strong>真实交易关闭。AI 是项目副驾驶，不会替你点击或下单。</strong>
+              <p>可以正常聊天，也可以询问项目使用、策略、回测、风控中心、账户和模拟交易问题。</p>
               <span class="ai-chat-section-title">问项目问题</span>
               <div class="ai-chat-suggestions" aria-label="推荐问题">
-                <button
-                  v-for="question in suggestedQuestions"
-                  :key="question"
-                  type="button"
-                  @click="useSuggestedQuestion(question)"
-                >
+                <button v-for="question in suggestedQuestions" :key="question" type="button" @click="useSuggestedQuestion(question)">
                   {{ question }}
                 </button>
               </div>
               <div class="ai-chat-guide" aria-label="引导模式">
                 <span class="ai-chat-section-title">让我一步一步带你操作</span>
-                <button
-                  v-for="action in guideActions"
-                  :key="action"
-                  type="button"
-                  @click="useGuideAction(action)"
-                >
+                <button v-for="action in guideActions" :key="action" type="button" @click="useGuideAction(action)">
                   {{ action }}
                 </button>
               </div>
@@ -299,15 +278,17 @@ watch(
               v-for="message in aiChat.messages"
               :key="message.message_id"
               class="ai-chat-message"
-              :class="`ai-chat-message--${message.role}`"
+              :class="[`ai-chat-message--${message.role}`, { 'ai-chat-message--interrupted': message.stream_status === 'interrupted' }]"
             >
               <span>{{ message.role === "user" ? "你" : "AI" }}</span>
-              <p>{{ message.content }}</p>
+              <p v-if="message.content">{{ message.content }}</p>
+              <p v-else-if="message.stream_status === 'thinking'" class="ai-chat-thinking">正在读取当前页面并思考...</p>
+              <small v-if="message.stream_status === 'interrupted'">回复中断，未保存到历史会话</small>
             </article>
 
-            <article v-if="aiChat.loading" class="ai-chat-message ai-chat-message--assistant">
+            <article v-if="aiChat.loading && !aiChat.streaming" class="ai-chat-message ai-chat-message--assistant">
               <span>AI</span>
-              <p>正在结合当前页面、项目模块、行情、账户和风控状态思考...</p>
+              <p>正在结合当前页面、行情、账户和风控状态思考...</p>
             </article>
 
             <div v-if="visibleActionCards.length" class="ai-chat-action-cards" aria-label="AI 安全动作卡片">
@@ -326,7 +307,9 @@ watch(
             </div>
           </div>
 
-          <p v-if="aiChat.errorMessage" class="ai-chat-error">{{ aiChat.errorMessage }}</p>
+          <p v-if="aiChat.errorMessage || aiChat.streamError" class="ai-chat-error">
+            {{ aiChat.streamError || aiChat.errorMessage }}
+          </p>
 
           <footer class="ai-chat-composer">
             <textarea
@@ -334,7 +317,7 @@ watch(
               data-ai-drawer-input="message"
               :maxlength="CHAT_DRAFT_LIMIT"
               rows="3"
-              placeholder="例如：这个页面怎么用？为什么这里没有下单？这个风控阻断是什么意思？"
+              placeholder="问项目怎么用、为什么没有下单，或者请 AI 解释当前风险..."
               @input="syncDraft"
               @compositionend="syncDraft"
               @keydown="handleKeydown"
@@ -353,9 +336,12 @@ watch(
                   {{ option.label }}
                 </button>
               </div>
-              <button class="cq-outline-button" :disabled="!aiChat.currentSession" @click="aiChat.deleteSession()">删除会话</button>
+              <button v-if="aiChat.streaming" class="cq-outline-button" type="button" aria-label="停止生成" @click="aiChat.stopGeneration()">
+                停止
+              </button>
+              <button v-else class="cq-outline-button" :disabled="!aiChat.currentSession" @click="aiChat.deleteSession()">删除会话</button>
               <button class="cq-primary-button" data-ai-drawer-send="message" :disabled="!canSend" @click="send">
-                {{ aiChat.loading ? "思考中" : "发送" }}
+                {{ aiChat.streaming ? "回答中" : aiChat.loading ? "思考中" : "发送" }}
               </button>
             </div>
           </footer>

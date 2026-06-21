@@ -7,7 +7,10 @@ from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 import os
 import time
-from typing import Any, Optional
+from typing import Any, AsyncIterator, Optional
+from uuid import uuid4
+
+from starlette.concurrency import iterate_in_threadpool
 
 from api.error_codes import ApiError, ErrorCode
 from api.models.request import (
@@ -1096,6 +1099,99 @@ class CryptoService:
             assistant_message=self._ai_chat_message_response(saved["assistant_message"]),
             context_summary=context_summary,
         )
+
+    async def stream_ai_assistant(self, request: AiChatRequest) -> AsyncIterator[dict[str, Any]]:
+        """Stream one advisory-only exchange and persist it only after completion."""
+        session_id = str(request.session_id or "").strip() or None
+        if session_id and not self.ai_chat_store.get_session_detail(session_id):
+            yield {
+                "event": "error",
+                "data": {"code": ErrorCode.RESOURCE_NOT_FOUND, "message": "AI chat session not found", "retryable": False},
+            }
+            return
+
+        symbol = normalize_crypto_symbol(request.symbol, self.crypto_config.get("default_quote_currency", "USDT"))
+        context_summary = await self._build_ai_chat_context_summary(
+            symbol=symbol,
+            period=request.period,
+            limit=request.limit,
+            include_context=request.include_context,
+            current_route=request.current_route,
+            current_module=request.current_module,
+            current_view_title=request.current_view_title,
+            visible_context=request.visible_context,
+            guide_mode=request.guide_mode,
+            user_goal=request.user_goal or request.message,
+        )
+        recent_messages = self.ai_chat_store.list_messages(session_id, limit=12) if session_id else []
+        request_id = f"AISTREAM_{uuid4().hex}"
+        active_model = str(request.model or self.ai_config.model)
+
+        try:
+            provider_events = self.ai_chat_assistant.stream_chat(
+                message=request.message,
+                context_summary=context_summary,
+                recent_messages=recent_messages,
+                model=request.model,
+            )
+            async for provider_event in iterate_in_threadpool(provider_events):
+                event_name = str(provider_event.get("event") or "")
+                active_model = str(provider_event.get("model") or active_model)
+                if event_name == "start":
+                    yield {
+                        "event": "start",
+                        "data": {
+                            "request_id": request_id,
+                            "model": active_model,
+                            "context_summary": context_summary,
+                        },
+                    }
+                elif event_name == "delta":
+                    yield {
+                        "event": "delta",
+                        "data": {
+                            "request_id": request_id,
+                            "model": active_model,
+                            "content": str(provider_event.get("content") or ""),
+                        },
+                    }
+                elif event_name == "done":
+                    content = str(provider_event.get("content") or "").strip()
+                    saved = self.ai_chat_store.save_exchange(
+                        session_id=session_id,
+                        title_seed=request.message,
+                        user_content=request.message,
+                        assistant_content=content,
+                        model=active_model,
+                        context_summary=context_summary,
+                    )
+                    if not saved:
+                        yield {
+                            "event": "error",
+                            "data": {
+                                "code": ErrorCode.RESOURCE_NOT_FOUND,
+                                "message": "AI chat session not found",
+                                "retryable": False,
+                            },
+                        }
+                        return
+                    response = AiChatResponse(
+                        session=self._ai_chat_session_response(saved["session"]),
+                        user_message=self._ai_chat_message_response(saved["user_message"]),
+                        assistant_message=self._ai_chat_message_response(saved["assistant_message"]),
+                        context_summary=context_summary,
+                    )
+                    yield {"event": "done", "data": response.model_dump(mode="json")}
+                    return
+        except Exception:
+            yield {
+                "event": "error",
+                "data": {
+                    "code": ErrorCode.AI_PROVIDER_UNAVAILABLE,
+                    "message": "AI 服务暂时不可用，请稍后重试或切换 Flash 模型。",
+                    "retryable": True,
+                },
+            }
 
     async def list_ai_chat_sessions(self, limit: int = 50, offset: int = 0) -> AiChatSessionListResponse:
         page = self.ai_chat_store.list_sessions(limit=limit, offset=offset)

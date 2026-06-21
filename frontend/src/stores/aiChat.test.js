@@ -210,4 +210,62 @@ describe("aiChat store", () => {
     });
     expect(store.messages.at(-1).context_summary.action_cards).toHaveLength(1);
   });
+
+  it("streams assistant deltas, replaces temporary messages, and marks an unread reply", async () => {
+    const encoder = new TextEncoder();
+    const body = [
+      'event: start\ndata: {"request_id":"REQ_1","model":"deepseek-v4-flash"}\n\n',
+      'event: delta\ndata: {"content":"risk "}\n\n',
+      'event: delta\ndata: {"content":"looks contained"}\n\n',
+      'event: done\ndata: {"session":{"session_id":"AICHAT_STREAM","title":"risk","message_count":2},"user_message":{"message_id":"U_STREAM","role":"user","content":"Explain risk"},"assistant_message":{"message_id":"A_STREAM","role":"assistant","content":"risk looks contained","model":"deepseek-v4-flash"},"context_summary":{"action_cards":[]}}\n\n',
+    ];
+    const responseStream = new ReadableStream({
+      start(controller) {
+        body.forEach((chunk) => controller.enqueue(encoder.encode(chunk)));
+        controller.close();
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(responseStream, { status: 200, headers: { "Content-Type": "text/event-stream" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(apiClient, "get").mockResolvedValueOnce({ data: { items: [], total: 0 } });
+
+    const store = useAiChatStore();
+    store.drawerOpen = false;
+    const response = await store.sendMessageStream({ message: "Explain risk", symbol: "BTC/USDT" });
+
+    expect(response.session.session_id).toBe("AICHAT_STREAM");
+    expect(store.streaming).toBe(false);
+    expect(store.firstTokenReceived).toBe(true);
+    expect(store.streamError).toBe("");
+    expect(store.unreadCount).toBe(1);
+    expect(store.messages.map((message) => message.message_id)).toEqual(["U_STREAM", "A_STREAM"]);
+    expect(store.messages.at(-1).content).toBe("risk looks contained");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/crypto/ai/chat/stream",
+      expect.objectContaining({ method: "POST", signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("aborts the active stream without persisting a partial exchange", async () => {
+    let rejectFetch;
+    const fetchMock = vi.fn().mockImplementation((_url, options) => {
+      return new Promise((_resolve, reject) => {
+        rejectFetch = reject;
+        options.signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const store = useAiChatStore();
+    const pending = store.sendMessageStream({ message: "Stop this", symbol: "BTC/USDT" });
+    store.stopGeneration();
+
+    await expect(pending).resolves.toBeNull();
+    expect(rejectFetch).toBeTypeOf("function");
+    expect(store.streaming).toBe(false);
+    expect(store.streamError).toContain("已停止");
+    expect(store.messages.some((message) => message.message_id?.startsWith("TEMP_"))).toBe(false);
+  });
 });

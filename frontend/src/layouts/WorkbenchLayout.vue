@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onErrorCaptured, onMounted, ref, watch } fro
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 
 import AiChatDrawer from "../components/AiChatDrawer.vue";
+import CopilotPet from "../components/CopilotPet.vue";
 import { useBoot } from "../composables/useBoot";
 import { useToast } from "../composables/useToast";
 import { useWorkspaceActions } from "../composables/useWorkspaceActions";
@@ -156,7 +157,7 @@ function formatTopVolume(value) {
 </script>
 
 <template>
-  <div class="cq-shell" :class="{ 'cq-shell--copilot-open': aiChat.drawerOpen }">
+  <div class="cq-shell">
     <aside class="cq-sidebar">
       <div class="cq-brand">
         <div class="cq-brand__mark" aria-hidden="true">
@@ -251,7 +252,7 @@ function formatTopVolume(value) {
           </div>
           <button
             class="cq-icon-button cq-user-button"
-            data-copilot-toggle="rail"
+            data-copilot-toggle="pet"
             :class="{ active: aiChat.drawerOpen }"
             :title="`${aiChat.drawerOpen ? '收起' : '打开'} AI 助手：${authStore.user?.username || 'admin'}`"
             aria-label="切换 AI 助手"
@@ -278,8 +279,10 @@ function formatTopVolume(value) {
       </main>
     </section>
 
-    <aside v-if="aiChat.drawerOpen" class="cq-copilot-rail" data-copilot-rail>
-      <AiChatDrawer surface="rail" />
+    <CopilotPet v-if="!aiChat.drawerOpen" @toggle="toggleCopilot" />
+
+    <aside v-if="aiChat.drawerOpen" class="cq-pet-chat-panel" data-copilot-panel>
+      <AiChatDrawer surface="pet-panel" />
     </aside>
   </div>
 </template>

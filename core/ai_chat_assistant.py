@@ -7,7 +7,7 @@ import os
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from uuid import uuid4
 
 from core.ai_signal_advisor import AiAdvisorConfig, safe_json, utc_now
@@ -801,6 +801,75 @@ class AiChatAssistant:
         recent_messages: list[dict[str, Any]] | None = None,
         model: str | None = None,
     ) -> dict[str, Any]:
+        api_key, payload = self._prepare_request(
+            message=message,
+            context_summary=context_summary,
+            recent_messages=recent_messages,
+        )
+
+        last_error: Exception | None = None
+        for candidate_model in self._candidate_models(model):
+            if not candidate_model:
+                continue
+            try:
+                content = self._call_provider(api_key=api_key, model=candidate_model, payload=payload)
+                if not content.strip():
+                    raise ValueError(f"{self._provider_label()} chat response was empty")
+                return {"model": candidate_model, "content": content.strip()}
+            except Exception as exc:  # pragma: no cover - covered by service tests with monkeypatches.
+                last_error = exc
+                if model or candidate_model == self.config.fallback_model:
+                    break
+        raise RuntimeError(f"{self._provider_label()} AI chat request failed: {last_error}")
+
+    def stream_chat(
+        self,
+        *,
+        message: str,
+        context_summary: dict[str, Any],
+        recent_messages: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Yield provider text as advisory-only chat events."""
+        api_key, payload = self._prepare_request(
+            message=message,
+            context_summary=context_summary,
+            recent_messages=recent_messages,
+        )
+        last_error: Exception | None = None
+        for candidate_model in self._candidate_models(model):
+            if not candidate_model:
+                continue
+            emitted = False
+            parts: list[str] = []
+            try:
+                for chunk in self._stream_provider(api_key=api_key, model=candidate_model, payload=payload):
+                    text = str(chunk or "")
+                    if not text:
+                        continue
+                    if not emitted:
+                        yield {"event": "start", "model": candidate_model}
+                        emitted = True
+                    parts.append(text)
+                    yield {"event": "delta", "model": candidate_model, "content": text}
+                content = "".join(parts).strip()
+                if not content:
+                    raise ValueError(f"{self._provider_label()} chat response was empty")
+                yield {"event": "done", "model": candidate_model, "content": content}
+                return
+            except Exception as exc:  # pragma: no cover - provider failures use service-level coverage.
+                last_error = exc
+                if emitted or model or candidate_model == self.config.fallback_model:
+                    break
+        raise RuntimeError(f"{self._provider_label()} AI chat request failed: {last_error}")
+
+    def _prepare_request(
+        self,
+        *,
+        message: str,
+        context_summary: dict[str, Any],
+        recent_messages: list[dict[str, Any]] | None,
+    ) -> tuple[str, dict[str, Any]]:
         if not self.config.enabled:
             raise RuntimeError("AI assistant is disabled in config")
         if self.config.provider not in {"openai", "deepseek"}:
@@ -808,8 +877,7 @@ class AiChatAssistant:
         api_key = os.environ.get(self.config.api_key_env, "").strip()
         if not api_key:
             raise RuntimeError(f"missing {self._provider_label()} API key env: {self.config.api_key_env}")
-
-        payload = {
+        return api_key, {
             "user_message": str(message or "").strip(),
             "context_summary": context_summary,
             "recent_messages": [
@@ -829,21 +897,6 @@ class AiChatAssistant:
             },
         }
 
-        last_error: Exception | None = None
-        for candidate_model in self._candidate_models(model):
-            if not candidate_model:
-                continue
-            try:
-                content = self._call_provider(api_key=api_key, model=candidate_model, payload=payload)
-                if not content.strip():
-                    raise ValueError(f"{self._provider_label()} chat response was empty")
-                return {"model": candidate_model, "content": content.strip()}
-            except Exception as exc:  # pragma: no cover - covered by service tests with monkeypatches.
-                last_error = exc
-                if model or candidate_model == self.config.fallback_model:
-                    break
-        raise RuntimeError(f"{self._provider_label()} AI chat request failed: {last_error}")
-
     def _candidate_models(self, selected_model: str | None = None) -> list[str]:
         if selected_model:
             return [str(selected_model).strip()]
@@ -861,6 +914,12 @@ class AiChatAssistant:
         if self.config.provider == "deepseek":
             return self._call_deepseek(api_key=api_key, model=model, payload=payload)
         return self._call_openai(api_key=api_key, model=model, payload=payload)
+
+    def _stream_provider(self, *, api_key: str, model: str, payload: dict[str, Any]) -> Iterator[str]:
+        if self.config.provider == "deepseek":
+            yield from self._stream_deepseek(api_key=api_key, model=model, payload=payload)
+            return
+        yield from self._stream_openai(api_key=api_key, model=model, payload=payload)
 
     def _call_openai(self, *, api_key: str, model: str, payload: dict[str, Any]) -> str:
         from openai import OpenAI
@@ -890,6 +949,44 @@ class AiChatAssistant:
             raise ValueError("DeepSeek chat response did not include choices")
         message = getattr(choices[0], "message", None)
         return str(getattr(message, "content", "") if message else "")
+
+    def _stream_openai(self, *, api_key: str, model: str, payload: dict[str, Any]) -> Iterator[str]:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key)
+        stream = client.responses.create(
+            model=model,
+            instructions=CHAT_SYSTEM_PROMPT,
+            input=safe_json(payload),
+            stream=True,
+        )
+        for event in stream:
+            if str(getattr(event, "type", "")) == "response.output_text.delta":
+                delta = getattr(event, "delta", "")
+                if delta:
+                    yield str(delta)
+
+    def _stream_deepseek(self, *, api_key: str, model: str, payload: dict[str, Any]) -> Iterator[str]:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key, base_url=self.config.base_url or "https://api.deepseek.com")
+        stream = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": CHAT_SYSTEM_PROMPT},
+                {"role": "user", "content": safe_json(payload)},
+            ],
+            temperature=0.2,
+            stream=True,
+        )
+        for event in stream:
+            choices = getattr(event, "choices", []) or []
+            if not choices:
+                continue
+            delta = getattr(choices[0], "delta", None)
+            content = getattr(delta, "content", "") if delta else ""
+            if content:
+                yield str(content)
 
     def _extract_output_text(self, response: Any) -> str:
         parts: list[str] = []

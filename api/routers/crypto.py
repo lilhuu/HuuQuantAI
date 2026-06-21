@@ -1,9 +1,11 @@
 """Crypto-only market data and paper-trading endpoints."""
 
 from collections import defaultdict, deque
+import json
 from time import monotonic
 
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import StreamingResponse
 
 from api.dependencies import get_crypto_service
 from api.error_codes import ApiError, ErrorCode
@@ -316,6 +318,28 @@ async def chat_crypto_ai_assistant(
     service: CryptoService = Depends(get_crypto_service),
 ) -> AiChatResponse:
     return await service.chat_ai_assistant(request)
+
+
+@router.post("/ai/chat/stream", summary="Stream chat with the advisory-only AI assistant")
+async def stream_crypto_ai_assistant(
+    request: AiChatRequest,
+    service: CryptoService = Depends(get_crypto_service),
+) -> StreamingResponse:
+    async def event_stream():
+        async for item in service.stream_ai_assistant(request):
+            event_name = str(item.get("event") or "message")
+            payload = json.dumps(item.get("data") or {}, ensure_ascii=False, separators=(",", ":"))
+            yield f"event: {event_name}\ndata: {payload}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/ai/chat/sessions", response_model=AiChatSessionListResponse, summary="List AI chat sessions")

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -108,6 +109,10 @@ def _service(tmp_path, *, ai_enabled=True):
 
 def _run(awaitable):
     return asyncio.run(awaitable)
+
+
+async def _collect_async(iterator):
+    return [item async for item in iterator]
 
 
 def test_ai_chat_persists_session_messages_and_context(tmp_path):
@@ -529,3 +534,140 @@ def test_ai_chat_api_routes(tmp_path):
     finally:
         app.dependency_overrides.clear()
         get_crypto_service.cache_clear()
+
+
+def test_deepseek_stream_chat_emits_start_deltas_and_done(monkeypatch):
+    captured = {}
+
+    class FakeChatCompletions:
+        def create(self, **kwargs):
+            captured["request"] = kwargs
+            return iter(
+                [
+                    SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="risk "))]),
+                    SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="looks contained"))]),
+                ]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, *, api_key, base_url=None):
+            self.chat = SimpleNamespace(completions=FakeChatCompletions())
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-test-key")
+
+    assistant = AiChatAssistant(
+        {
+            "enabled": True,
+            "provider": "deepseek",
+            "model": "deepseek-v4-flash",
+            "fallback_model": "deepseek-v4-flash",
+            "api_key_env": "DEEPSEEK_API_KEY",
+            "base_url": "https://api.deepseek.com",
+        }
+    )
+
+    events = list(assistant.stream_chat(message="Analyze risk", context_summary={"symbol": "BTC/USDT"}))
+
+    assert captured["request"]["stream"] is True
+    assert [event["event"] for event in events] == ["start", "delta", "delta", "done"]
+    assert events[1]["content"] == "risk "
+    assert events[-1] == {
+        "event": "done",
+        "model": "deepseek-v4-flash",
+        "content": "risk looks contained",
+    }
+
+
+def test_ai_chat_stream_service_persists_only_completed_exchange(tmp_path):
+    service = _service(tmp_path)
+    service.ai_chat_assistant.stream_chat = MagicMock(
+        return_value=iter(
+            [
+                {"event": "start", "model": "gpt-5.2"},
+                {"event": "delta", "model": "gpt-5.2", "content": "paper "},
+                {"event": "delta", "model": "gpt-5.2", "content": "research"},
+                {"event": "done", "model": "gpt-5.2", "content": "paper research"},
+            ]
+        )
+    )
+
+    events = _run(
+        _collect_async(
+            service.stream_ai_assistant(
+                AiChatRequest(symbol="BTC/USDT", period="1h", limit=60, message="Explain the current risk")
+            )
+        )
+    )
+
+    assert [event["event"] for event in events] == ["start", "delta", "delta", "done"]
+    assert events[-1]["data"]["assistant_message"]["content"] == "paper research"
+    assert _run(service.list_ai_chat_sessions()).total == 1
+    service.paper_broker.place_order.assert_not_called()
+    service.testnet_executor.place_order.assert_not_called()
+
+
+def test_ai_chat_stream_api_uses_sse_event_contract(tmp_path):
+    service = _service(tmp_path)
+    service.ai_chat_assistant.stream_chat = MagicMock(
+        return_value=iter(
+            [
+                {"event": "start", "model": "gpt-5.2"},
+                {"event": "delta", "model": "gpt-5.2", "content": "hello"},
+                {"event": "done", "model": "gpt-5.2", "content": "hello"},
+            ]
+        )
+    )
+    app.dependency_overrides[get_current_user] = lambda: {"user_id": 1, "username": "tester"}
+    app.dependency_overrides[get_crypto_service] = lambda: service
+
+    try:
+        with TestClient(app) as client:
+            with client.stream(
+                "POST",
+                "/api/v1/crypto/ai/chat/stream",
+                headers={"Authorization": "Bearer test-token"},
+                json={"symbol": "BTC/USDT", "period": "1h", "limit": 60, "message": "Hello"},
+            ) as response:
+                body = "".join(response.iter_text())
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        assert "event: start" in body
+        assert "event: delta" in body
+        assert "event: done" in body
+        done_data = next(
+            json.loads(line.removeprefix("data: "))
+            for block in body.split("\n\n")
+            if block.startswith("event: done")
+            for line in block.splitlines()
+            if line.startswith("data: ")
+        )
+        assert done_data["assistant_message"]["content"] == "hello"
+    finally:
+        app.dependency_overrides.clear()
+        get_crypto_service.cache_clear()
+
+
+def test_ai_chat_stream_error_does_not_persist_partial_exchange(tmp_path):
+    service = _service(tmp_path)
+
+    def broken_stream(**_kwargs):
+        yield {"event": "start", "model": "gpt-5.2"}
+        yield {"event": "delta", "model": "gpt-5.2", "content": "partial"}
+        raise RuntimeError("provider disconnected")
+
+    service.ai_chat_assistant.stream_chat = broken_stream
+    events = _run(
+        _collect_async(
+            service.stream_ai_assistant(
+                AiChatRequest(symbol="BTC/USDT", period="1h", message="Explain risk")
+            )
+        )
+    )
+
+    assert [event["event"] for event in events] == ["start", "delta", "error"]
+    assert events[-1]["data"]["retryable"] is True
+    assert _run(service.list_ai_chat_sessions()).total == 0
+    service.paper_broker.place_order.assert_not_called()
+    service.testnet_executor.place_order.assert_not_called()

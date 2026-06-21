@@ -39,4 +39,29 @@
 - P3: Add deeper micro-interactions for order book hover, risk step drill-down and portfolio attribution filters.
 - P3: Add more route screenshots after live production data is available.
 
+## Floating Pet Copilot QA
+
+**Evidence**
+- Source visual: `C:\Users\ADMINI~1\AppData\Local\Temp\codex-clipboard-78e879ab-68b8-4be2-ac65-99d2085ebfa6.png`.
+- Desktop closed, 1280 x 720: `docs/design-qa/floating-pet/desktop-closed.png`.
+- Desktop open, 1280 x 720: `docs/design-qa/floating-pet/desktop-open.png`.
+- Mobile closed, 390 x 844: `docs/design-qa/floating-pet/mobile-closed.png`.
+- Mobile open, 390 x 844: `docs/design-qa/floating-pet/mobile-open.png`.
+
+**State Coverage**
+- Floating pet idle state and unread attention state.
+- Overlay chat panel on desktop without changing the workbench grid.
+- Full-screen chat panel below 760px.
+- Streaming response, background completion while closed, stop generation, and model selection.
+- Reduced-motion fallback to static PNG.
+
+**Findings And Patches**
+- Fixed a class collision that made the desktop panel participate in normal page flow.
+- Fixed a late shell grid rule that caused mobile horizontal overflow.
+- Hid the floating pet while its chat panel is open to avoid covering panel controls.
+- Verified desktop panel bounds are 460px wide with no horizontal overflow.
+- Verified mobile panel fills 390 x 844 and keeps the composer visible.
+- Verified generated robot assets have transparent backgrounds and remain legible at 88px.
+- No unresolved P0, P1, or P2 visual issues.
+
 final result: passed

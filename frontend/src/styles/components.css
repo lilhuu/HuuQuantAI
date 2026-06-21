@@ -1233,3 +1233,282 @@ th {
     flex: 1 1 100%;
   }
 }
+
+.copilot-pet {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 82;
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.copilot-pet__button {
+  position: relative;
+  width: 88px;
+  height: 88px;
+  padding: 7px;
+  overflow: visible;
+  border: 1px solid rgba(116, 96, 255, 0.58);
+  border-radius: 50%;
+  background: rgba(13, 14, 24, 0.96);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.42);
+  cursor: pointer;
+}
+
+.copilot-pet__button:hover,
+.copilot-pet__button:focus-visible,
+.copilot-pet--open .copilot-pet__button {
+  border-color: #16d9d2;
+  outline: none;
+  transform: translateY(-2px);
+}
+
+.copilot-pet__button img {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: auto;
+  user-select: none;
+}
+
+.copilot-pet__halo {
+  position: absolute;
+  inset: -5px;
+  z-index: 1;
+  border: 1px solid rgba(116, 96, 255, 0.34);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.copilot-pet__bubble {
+  max-width: 210px;
+  padding: 8px 11px;
+  border: 1px solid rgba(104, 116, 150, 0.28);
+  border-radius: 8px;
+  color: #dce5f7;
+  background: rgba(8, 10, 17, 0.96);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.34);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 160ms ease, transform 160ms ease;
+  pointer-events: none;
+}
+
+.copilot-pet:hover .copilot-pet__bubble,
+.copilot-pet--thinking .copilot-pet__bubble,
+.copilot-pet--speaking .copilot-pet__bubble,
+.copilot-pet--attention .copilot-pet__bubble,
+.copilot-pet--error .copilot-pet__bubble {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.copilot-pet__badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  z-index: 4;
+  min-width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0 6px;
+  border: 2px solid #080a11;
+  border-radius: 999px;
+  color: #061312;
+  background: #16d9d2;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.copilot-pet--thinking .copilot-pet__halo,
+.copilot-pet--speaking .copilot-pet__halo {
+  animation: copilot-pet-pulse 1.2s ease-in-out infinite;
+}
+
+.copilot-pet--idle .copilot-pet__button img {
+  animation: copilot-pet-float 3.6s ease-in-out infinite;
+}
+
+.copilot-pet--thinking .copilot-pet__button img {
+  animation: copilot-pet-think 1.1s ease-in-out infinite;
+}
+
+.copilot-pet--speaking .copilot-pet__button img {
+  animation: copilot-pet-speak 520ms ease-in-out infinite;
+}
+
+.copilot-pet--attention .copilot-pet__button {
+  animation: copilot-pet-attention 1.8s ease-in-out infinite;
+}
+
+.copilot-pet--error .copilot-pet__button {
+  border-color: rgba(255, 107, 107, 0.76);
+}
+
+.copilot-pet--error .copilot-pet__button img {
+  animation: copilot-pet-error 480ms ease-in-out 2;
+}
+
+.copilot-pet--sleep .copilot-pet__button img {
+  opacity: 0.68;
+  transform: translateY(3px) rotate(-2deg);
+}
+
+@keyframes copilot-pet-pulse {
+  0%, 100% { opacity: 0.36; transform: scale(1); }
+  50% { opacity: 0.9; transform: scale(1.06); }
+}
+
+@keyframes copilot-pet-attention {
+  0%, 78%, 100% { transform: translateY(0); }
+  84% { transform: translateY(-5px); }
+  90% { transform: translateY(0); }
+  95% { transform: translateY(-2px); }
+}
+
+@keyframes copilot-pet-float {
+  0%, 100% { transform: translateY(1px) scale(0.98); }
+  50% { transform: translateY(-2px) scale(1); }
+}
+
+@keyframes copilot-pet-think {
+  0%, 100% { transform: rotate(-1.5deg) translateY(0); }
+  50% { transform: rotate(1.5deg) translateY(-2px); }
+}
+
+@keyframes copilot-pet-speak {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-2px) scale(1.02); }
+}
+
+@keyframes copilot-pet-error {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+
+.ai-chat-pet-shell,
+.ai-chat-drawer--pet {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.ai-chat-drawer--pet {
+  border: 0;
+  border-radius: 0;
+  background: #090a10;
+  box-shadow: none;
+}
+
+.ai-chat-drawer--pet .ai-chat-header {
+  padding: 16px 16px 12px;
+}
+
+.ai-chat-drawer--pet .ai-chat-header strong {
+  font-size: 21px;
+}
+
+.ai-chat-drawer--pet .ai-chat-context-bar {
+  margin: 8px 14px 10px;
+  padding: 10px 12px;
+}
+
+.ai-chat-drawer--pet .ai-chat-body {
+  grid-template-columns: 1fr;
+}
+
+.ai-chat-drawer--pet .ai-chat-settings summary {
+  min-height: 40px;
+  padding: 0 14px;
+}
+
+.ai-chat-drawer--pet .ai-chat-context {
+  grid-template-columns: minmax(132px, 1fr) 82px 78px;
+  gap: 10px;
+  padding: 10px 14px 14px;
+}
+
+.ai-chat-drawer--pet .ai-chat-toggle {
+  grid-column: span 3;
+}
+
+.ai-chat-drawer--pet .ai-chat-messages {
+  padding: 14px;
+}
+
+.ai-chat-drawer--pet .ai-chat-message,
+.ai-chat-drawer--pet .ai-chat-welcome,
+.ai-chat-drawer--pet .ai-chat-action-cards {
+  width: 100%;
+  max-width: none;
+}
+
+.ai-chat-drawer--pet .ai-chat-suggestions,
+.ai-chat-drawer--pet .ai-chat-guide,
+.ai-chat-drawer--pet .ai-chat-action-cards {
+  grid-template-columns: 1fr;
+}
+
+.ai-chat-drawer--pet .ai-chat-actions {
+  gap: 8px;
+}
+
+.ai-chat-drawer--pet .ai-chat-composer {
+  padding: 14px;
+}
+
+.ai-chat-message--interrupted {
+  border-color: rgba(255, 189, 89, 0.38);
+}
+
+.ai-chat-message--interrupted small,
+.ai-chat-thinking {
+  color: #aeb8cc;
+  font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .copilot-pet {
+    right: 14px;
+    bottom: max(14px, env(safe-area-inset-bottom));
+  }
+
+  .copilot-pet__button {
+    width: 72px;
+    height: 72px;
+  }
+
+  .copilot-pet--open {
+    display: none;
+  }
+
+  .ai-chat-drawer--pet .ai-chat-context {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-chat-drawer--pet .ai-chat-toggle {
+    grid-column: auto;
+  }
+
+  .ai-chat-drawer--pet .ai-chat-actions > button,
+  .ai-chat-drawer--pet .ai-chat-model-switch {
+    flex: 1 1 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .copilot-pet *,
+  .copilot-pet__bubble {
+    animation: none !important;
+    transition: none !important;
+  }
+}

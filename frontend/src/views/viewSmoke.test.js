@@ -187,11 +187,11 @@ describe("view smoke tests", () => {
     wrapper.unmount();
   });
 
-  it("renders the AI copilot as a persistent workbench rail and toggles it from the topbar", async () => {
+  it("renders a floating copilot pet that opens an overlay chat panel", async () => {
     const pinia = createPinia();
     setActivePinia(pinia);
     const aiChat = useAiChatStore();
-    aiChat.drawerOpen = true;
+    aiChat.drawerOpen = false;
 
     const wrapper = shallowMount(WorkbenchLayout, {
       global: {
@@ -204,20 +204,26 @@ describe("view smoke tests", () => {
           },
           AiChatDrawer: {
             props: ["surface"],
-            template: '<aside class="ai-chat-drawer-stub" :data-surface="surface">AI rail</aside>',
+            template: '<aside class="ai-chat-drawer-stub" :data-surface="surface">AI panel</aside>',
+          },
+          CopilotPet: {
+            emits: ["toggle"],
+            template: '<button data-copilot-pet type="button" @click="$emit(`toggle`)">Pet</button>',
           },
         },
       },
     });
 
-    expect(wrapper.find("[data-copilot-rail]").exists()).toBe(true);
-    expect(wrapper.find(".ai-chat-drawer-stub").attributes("data-surface")).toBe("rail");
-    expect(wrapper.find('[data-copilot-toggle="rail"]').attributes("aria-pressed")).toBe("true");
+    expect(wrapper.find("[data-copilot-pet]").exists()).toBe(true);
+    expect(wrapper.find("[data-copilot-panel]").exists()).toBe(false);
+    expect(wrapper.classes()).not.toContain("cq-shell--copilot-open");
 
-    await wrapper.find('[data-copilot-toggle="rail"]').trigger("click");
+    await wrapper.find("[data-copilot-pet]").trigger("click");
 
-    expect(aiChat.drawerOpen).toBe(false);
-    expect(wrapper.find("[data-copilot-rail]").exists()).toBe(false);
+    expect(aiChat.drawerOpen).toBe(true);
+    expect(wrapper.find("[data-copilot-panel]").exists()).toBe(true);
+    expect(wrapper.find("[data-copilot-panel]").classes()).toContain("cq-pet-chat-panel");
+    expect(wrapper.find(".ai-chat-drawer-stub").attributes("data-surface")).toBe("pet-panel");
     wrapper.unmount();
   });
 
@@ -300,10 +306,10 @@ describe("view smoke tests", () => {
     setActivePinia(pinia);
     const aiChat = useAiChatStore();
     aiChat.drawerOpen = true;
-    const sendMessage = vi.spyOn(aiChat, "sendMessage").mockResolvedValueOnce({ success: true });
+    const sendMessage = vi.spyOn(aiChat, "sendMessageStream").mockResolvedValueOnce({ success: true });
 
     const wrapper = shallowMount(AiChatDrawer, {
-      props: { surface: "rail" },
+      props: { surface: "pet-panel" },
       global: {
         plugins: [pinia],
       },
