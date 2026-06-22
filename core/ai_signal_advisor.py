@@ -238,6 +238,8 @@ class AiSignalContextBuilder:
             "risk": context.get("risk", {}),
             "ai_limits": context.get("ai_limits", {}),
             "macro": context.get("macro", {}),
+            "execution_mode": context.get("execution_mode", "advisory"),
+            "strategy_candidate": context.get("strategy_candidate", {}),
         }
 
 
@@ -247,7 +249,14 @@ class AiSignalAdvisor:
     def __init__(self, config: dict[str, Any] | AiAdvisorConfig | None = None) -> None:
         self.config = config if isinstance(config, AiAdvisorConfig) else AiAdvisorConfig.from_dict(config)
 
-    def analyze(self, context: dict[str, Any]) -> dict[str, Any]:
+    def analyze(
+        self,
+        context: dict[str, Any],
+        *,
+        selected_model: str | None = None,
+        fallback_model: str | None = None,
+        execution_mode: str = "advisory",
+    ) -> dict[str, Any]:
         if not self.config.enabled:
             raise RuntimeError("AI advisor is disabled in config")
         if self.config.provider not in {"openai", "deepseek"}:
@@ -257,11 +266,16 @@ class AiSignalAdvisor:
             raise RuntimeError(f"missing {self._provider_label()} API key env: {self.config.api_key_env}")
 
         last_error: Exception | None = None
-        for model in self._candidate_models():
+        for model in self._candidate_models(selected_model, fallback_model):
             if not model:
                 continue
             try:
-                payload = self._call_provider(api_key=api_key, model=model, context=context)
+                payload = self._call_provider(
+                    api_key=api_key,
+                    model=model,
+                    context=context,
+                    execution_mode=execution_mode,
+                )
                 validated = validate_ai_advice(payload, expected_symbol=str(context.get("symbol") or ""))
                 validated["model"] = model
                 return validated
@@ -271,9 +285,9 @@ class AiSignalAdvisor:
                     break
         raise RuntimeError(f"{self._provider_label()} AI signal request failed: {last_error}")
 
-    def _candidate_models(self) -> list[str]:
+    def _candidate_models(self, selected_model: str | None = None, fallback_model: str | None = None) -> list[str]:
         candidates: list[str] = []
-        for model in [self.config.model, self.config.fallback_model]:
+        for model in [selected_model or self.config.model, fallback_model or self.config.fallback_model]:
             model_text = str(model or "").strip()
             if model_text and model_text not in candidates:
                 candidates.append(model_text)
@@ -282,18 +296,25 @@ class AiSignalAdvisor:
     def _provider_label(self) -> str:
         return "DeepSeek" if self.config.provider == "deepseek" else "OpenAI"
 
-    def _call_provider(self, *, api_key: str, model: str, context: dict[str, Any]) -> dict[str, Any]:
+    def _call_provider(
+        self,
+        *,
+        api_key: str,
+        model: str,
+        context: dict[str, Any],
+        execution_mode: str,
+    ) -> dict[str, Any]:
         if self.config.provider == "deepseek":
-            return self._call_deepseek(api_key=api_key, model=model, context=context)
-        return self._call_openai(api_key=api_key, model=model, context=context)
+            return self._call_deepseek(api_key=api_key, model=model, context=context, execution_mode=execution_mode)
+        return self._call_openai(api_key=api_key, model=model, context=context, execution_mode=execution_mode)
 
-    def _call_openai(self, *, api_key: str, model: str, context: dict[str, Any]) -> dict[str, Any]:
+    def _call_openai(self, *, api_key: str, model: str, context: dict[str, Any], execution_mode: str) -> dict[str, Any]:
         from openai import OpenAI
 
         client = OpenAI(api_key=api_key)
         response = client.responses.create(
             model=model,
-            instructions=self._system_prompt(),
+            instructions=self._system_prompt(execution_mode),
             input=safe_json(context),
             text={
                 "format": {
@@ -309,14 +330,14 @@ class AiSignalAdvisor:
             raise ValueError("OpenAI response did not include output_text")
         return json.loads(output_text)
 
-    def _call_deepseek(self, *, api_key: str, model: str, context: dict[str, Any]) -> dict[str, Any]:
+    def _call_deepseek(self, *, api_key: str, model: str, context: dict[str, Any], execution_mode: str) -> dict[str, Any]:
         from openai import OpenAI
 
         client = OpenAI(api_key=api_key, base_url=self.config.base_url or "https://api.deepseek.com")
         response = client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": self._system_prompt()},
+                {"role": "system", "content": self._system_prompt(execution_mode)},
                 {"role": "user", "content": safe_json(context)},
             ],
             response_format={"type": "json_object"},
@@ -331,7 +352,13 @@ class AiSignalAdvisor:
             raise ValueError("DeepSeek response did not include message content")
         return parse_ai_response_payload(output_text, provider_label="DeepSeek")
 
-    def _system_prompt(self) -> str:
+    def _system_prompt(self, execution_mode: str = "advisory") -> str:
+        execution_rule = (
+            "A local risk engine may convert an approved signal into a PaperBroker simulation order without manual confirmation. "
+            "You cannot bypass its limits, call an exchange, or enable real trading. "
+            if execution_mode == "auto_paper"
+            else "The user must manually confirm any paper order; you cannot place orders. "
+        )
         return (
             "You are an advisory-only crypto risk analyst for a local paper-trading system. "
             "Return only one valid JSON object that matches the schema. Do not wrap it in Markdown. "
@@ -341,7 +368,7 @@ class AiSignalAdvisor:
             "Do not promise profits. "
             "Never recommend leverage, short selling, mainnet trading, or bypassing risk checks. "
             "Prefer HOLD when the evidence is weak. Include concrete risk notes and invalidation conditions. "
-            "The user must manually confirm any paper order; you cannot place orders."
+            + execution_rule
         )
 
     def _extract_output_text(self, response: Any) -> str:

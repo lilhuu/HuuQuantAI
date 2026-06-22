@@ -65,3 +65,29 @@
 - No unresolved P0, P1, or P2 visual issues.
 
 final result: passed
+
+## AI Supervised Paper Trading QA
+
+**Scope**
+- Removed the repeated feature-page copilot card and the top-bar AI shortcut.
+- Kept the floating robot as the only chat-panel entry inside authenticated workbench pages.
+- Added the AI supervised PaperBroker controls and status panel to the automatic-trading page.
+
+**Browser Evidence**
+- Verified `/auto` in an authenticated local QA session against `http://127.0.0.1:5174`.
+- Confirmed the page exposes `规则自动 / AI 模拟托管`, the manual PaperBroker acknowledgement, Pro/Flash supervisor status, provider failure count, and 2% stop-loss / 4% take-profit protection.
+- Confirmed the feature page contains no embedded copilot panel or duplicate `问 AI` / `打开 AI 助手` command.
+- Confirmed the floating robot opens the project-copilot panel and the `发送` button remains visible at the bottom of the 390 x 844 mobile viewport.
+- Measured no horizontal document overflow in the authenticated workbench or the open mobile chat panel.
+- The in-app browser screenshot capture timed out; DOM snapshots, accessible controls, viewport bounds, and overflow measurements were used for this round's visual verification.
+
+**Safety Evidence**
+- The UI states that AI supervision only operates the PaperBroker simulated account.
+- Start remains disabled until the user acknowledges the simulation-only boundary.
+- Restart behavior is displayed as requiring a new manual start.
+- No Testnet or real-trading control is exposed by the AI supervisor UI.
+
+**Findings**
+- No unresolved P0, P1, or P2 visual or interaction issues.
+
+final result: passed

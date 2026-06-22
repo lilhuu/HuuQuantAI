@@ -250,17 +250,6 @@ function formatTopVolume(value) {
             <span>真实交易</span>
             <strong class="number-down">已关闭</strong>
           </div>
-          <button
-            class="cq-icon-button cq-user-button"
-            data-copilot-toggle="pet"
-            :class="{ active: aiChat.drawerOpen }"
-            :title="`${aiChat.drawerOpen ? '收起' : '打开'} AI 助手：${authStore.user?.username || 'admin'}`"
-            aria-label="切换 AI 助手"
-            :aria-pressed="String(aiChat.drawerOpen)"
-            @click="toggleCopilot"
-          >
-            <span aria-hidden="true">AI</span>
-          </button>
           <button class="cq-icon-button" title="刷新工作台" aria-label="刷新工作台" @click="refreshWorkspace">↻</button>
           <button class="cq-outline-button cq-logout-button" @click="logout">退出</button>
         </div>

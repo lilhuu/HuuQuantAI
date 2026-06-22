@@ -340,7 +340,7 @@ watch(currentModuleLabel, (nextLabel, previousLabel) => {
                 停止
               </button>
               <button v-else class="cq-outline-button" :disabled="!aiChat.currentSession" @click="aiChat.deleteSession()">删除会话</button>
-              <button class="cq-primary-button" data-ai-drawer-send="message" :disabled="!canSend" @click="send">
+              <button class="cq-primary-button ai-chat-send-button" data-ai-drawer-send="message" :disabled="!canSend" @click="send">
                 {{ aiChat.streaming ? "回答中" : aiChat.loading ? "思考中" : "发送" }}
               </button>
             </div>

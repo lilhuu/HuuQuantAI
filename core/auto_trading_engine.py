@@ -59,6 +59,7 @@ def _config_value(data: dict[str, Any], key: str, default: Any) -> Any:
 class AutoTradingConfig:
     enabled: bool = False
     mode: str = "paper"
+    decision_mode: str = "strategy"
     symbols: list[str] = field(default_factory=lambda: ["BTC/USDT", "ETH/USDT", "SOL/USDT"])
     period: str = "1h"
     timeframes: list[str] = field(default_factory=list)
@@ -68,6 +69,12 @@ class AutoTradingConfig:
     max_order_notional: float = 1000.0
     min_order_notional: float = 10.0
     confidence_threshold: float = 0.35
+    ai_model: str = "deepseek-v4-pro"
+    ai_fallback_model: str = "deepseek-v4-flash"
+    ai_on_new_candle_only: bool = True
+    ai_confidence_threshold: float = 0.65
+    stop_loss_pct: float = 0.02
+    take_profit_pct: float = 0.04
     max_daily_loss: float = 0.0
     max_consecutive_losses: int = 0
     cooldown_minutes: int = 30
@@ -92,6 +99,7 @@ class AutoTradingConfig:
         return cls(
             enabled=bool(data.get("enabled", False)),
             mode="paper",
+            decision_mode="ai_supervised" if str(data.get("decision_mode") or "strategy") == "ai_supervised" else "strategy",
             symbols=symbols,
             period=str(data.get("period") or "1h"),
             timeframes=[str(item) for item in data.get("timeframes", []) if str(item or "").strip()],
@@ -101,6 +109,12 @@ class AutoTradingConfig:
             max_order_notional=max(1.0, float(data.get("max_order_notional", 1000.0) or 1000.0)),
             min_order_notional=max(0.0, float(data.get("min_order_notional", 10.0) or 10.0)),
             confidence_threshold=max(0.0, min(float(data.get("confidence_threshold", 0.35) or 0.35), 1.0)),
+            ai_model=str(data.get("ai_model") or "deepseek-v4-pro"),
+            ai_fallback_model=str(data.get("ai_fallback_model") or "deepseek-v4-flash"),
+            ai_on_new_candle_only=bool(data.get("ai_on_new_candle_only", True)),
+            ai_confidence_threshold=max(0.0, min(float(data.get("ai_confidence_threshold", 0.65) or 0.65), 1.0)),
+            stop_loss_pct=max(0.001, min(float(data.get("stop_loss_pct", 0.02) or 0.02), 0.2)),
+            take_profit_pct=max(0.001, min(float(data.get("take_profit_pct", 0.04) or 0.04), 0.5)),
             max_daily_loss=max(0.0, float(data.get("max_daily_loss", 0.0) or 0.0)),
             max_consecutive_losses=max(0, int(data.get("max_consecutive_losses", 0) or 0)),
             cooldown_minutes=max(1, min(int(_config_value(data, "cooldown_minutes", 30)), 24 * 60)),
@@ -112,6 +126,7 @@ class AutoTradingConfig:
         return {
             "enabled": self.enabled,
             "mode": "paper",
+            "decision_mode": self.decision_mode,
             "symbols": list(self.symbols),
             "period": self.period,
             "timeframes": list(self.timeframes),
@@ -121,6 +136,12 @@ class AutoTradingConfig:
             "max_order_notional": self.max_order_notional,
             "min_order_notional": self.min_order_notional,
             "confidence_threshold": self.confidence_threshold,
+            "ai_model": self.ai_model,
+            "ai_fallback_model": self.ai_fallback_model,
+            "ai_on_new_candle_only": self.ai_on_new_candle_only,
+            "ai_confidence_threshold": self.ai_confidence_threshold,
+            "stop_loss_pct": self.stop_loss_pct,
+            "take_profit_pct": self.take_profit_pct,
             "max_daily_loss": self.max_daily_loss,
             "max_consecutive_losses": self.max_consecutive_losses,
             "cooldown_minutes": self.cooldown_minutes,
@@ -313,6 +334,7 @@ class AutoTradingEngine:
         self.loop_running = False
         self.next_run_at = ""
         self.last_error_type = ""
+        self.ai_supervisor_status: dict[str, Any] = {}
         self._log("INFO", "initialized", "Paper auto trading engine initialized")
 
     def update_config(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -360,6 +382,15 @@ class AutoTradingEngine:
         self.next_run_at = ""
         self.last_message = "auto trading is stopped"
         self._log("INFO", "stopped", self.last_message)
+        return self.status()
+
+    def block(self, reason: str, event: str = "blocked") -> dict[str, Any]:
+        self.state = "blocked"
+        self.config.enabled = False
+        self.loop_running = False
+        self.next_run_at = ""
+        self.last_message = str(reason or "automatic paper trading blocked")
+        self._log("ERROR", event, self.last_message)
         return self.status()
 
     def build_order_decisions(
@@ -468,6 +499,7 @@ class AutoTradingEngine:
             "loop_running": bool(self.loop_running),
             "next_run_at": self.next_run_at,
             "last_error_type": self.last_error_type,
+            "ai_supervisor": dict(self.ai_supervisor_status),
         }
 
     def get_logs(self, limit: int = 100) -> list[dict[str, Any]]:

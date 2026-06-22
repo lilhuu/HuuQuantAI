@@ -402,6 +402,7 @@ class AutoTradingStatusResponse(BaseModel):
     loop_running: bool = False
     next_run_at: str = ""
     last_error_type: str = ""
+    ai_supervisor: dict[str, Any] = Field(default_factory=dict)
 
 
 class AutoTradingLogsResponse(BaseModel):

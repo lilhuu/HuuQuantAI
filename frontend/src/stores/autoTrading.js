@@ -7,18 +7,25 @@ import { normalizeCryptoSymbol } from "../lib/tradingUtils";
 const DEFAULT_CONFIG = {
   enabled: false,
   mode: "paper",
+  decision_mode: "ai_supervised",
   symbols: ["BTC/USDT", "ETH/USDT", "SOL/USDT"],
   period: "1h",
   timeframes: [],
   scan_interval_seconds: 30,
   max_positions: 3,
   per_trade_position_ratio: 0.1,
-  max_order_notional: 1000,
+  max_order_notional: 300,
   min_order_notional: 10,
   confidence_threshold: 0.35,
-  max_daily_loss: 0,
-  max_consecutive_losses: 0,
-  cooldown_minutes: 30,
+  ai_model: "deepseek-v4-pro",
+  ai_fallback_model: "deepseek-v4-flash",
+  ai_on_new_candle_only: true,
+  ai_confidence_threshold: 0.65,
+  stop_loss_pct: 0.02,
+  take_profit_pct: 0.04,
+  max_daily_loss: 200,
+  max_consecutive_losses: 3,
+  cooldown_minutes: 60,
   real_trading_enabled: false,
   strategies: [
     {
@@ -54,6 +61,7 @@ const DEFAULT_CONFIG = {
  * @typedef {Object} AutoTradingConfig
  * @property {boolean} enabled
  * @property {"paper"} mode
+ * @property {"strategy" | "ai_supervised"} decision_mode
  * @property {string[]} symbols
  * @property {string} period
  * @property {string[]} timeframes
@@ -63,6 +71,12 @@ const DEFAULT_CONFIG = {
  * @property {number} max_order_notional
  * @property {number} min_order_notional
  * @property {number} confidence_threshold
+ * @property {"deepseek-v4-flash" | "deepseek-v4-pro"} ai_model
+ * @property {"deepseek-v4-flash" | "deepseek-v4-pro"} ai_fallback_model
+ * @property {boolean} ai_on_new_candle_only
+ * @property {number} ai_confidence_threshold
+ * @property {number} stop_loss_pct
+ * @property {number} take_profit_pct
  * @property {number} max_daily_loss
  * @property {number} max_consecutive_losses
  * @property {number} cooldown_minutes
@@ -84,6 +98,7 @@ export function normalizeConfig(config = {}) {
   return {
     ...merged,
     mode: "paper",
+    decision_mode: merged.decision_mode === "strategy" ? "strategy" : "ai_supervised",
     symbols: symbols.length ? [...new Set(symbols)] : DEFAULT_CONFIG.symbols,
     real_trading_enabled: false,
   };
@@ -102,6 +117,7 @@ export const useAutoTradingStore = defineStore("auto-trading", () => {
   const loopRunning = computed(() => Boolean(status.value?.loop_running));
   const nextRunAt = computed(() => status.value?.next_run_at || "");
   const lastErrorType = computed(() => status.value?.last_error_type || "");
+  const aiSupervisor = computed(() => status.value?.ai_supervisor || {});
   const stateLabel = computed(() => {
     const labels = {
       running: "运行中",
@@ -216,6 +232,7 @@ export const useAutoTradingStore = defineStore("auto-trading", () => {
     loopRunning,
     nextRunAt,
     lastErrorType,
+    aiSupervisor,
     stateLabel,
     fetchStatus,
     saveConfig,

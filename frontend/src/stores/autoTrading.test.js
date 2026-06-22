@@ -18,6 +18,11 @@ describe("autoTrading store", () => {
 
     expect(config.mode).toBe("paper");
     expect(config.real_trading_enabled).toBe(false);
+    expect(config.decision_mode).toBe("ai_supervised");
+    expect(config.ai_model).toBe("deepseek-v4-pro");
+    expect(config.ai_fallback_model).toBe("deepseek-v4-flash");
+    expect(config.ai_confidence_threshold).toBe(0.65);
+    expect(config.max_daily_loss).toBe(200);
     expect(config.symbols).toEqual(["BTC/USDT", "ETH/USDT", "BAD/USDT"]);
     expect(config.max_positions).toBe(8);
   });

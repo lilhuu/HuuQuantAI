@@ -83,6 +83,7 @@ class AiSignalAnalyzeRequest(BaseModel):
     symbol: str = Field(..., min_length=1, max_length=32, examples=["BTC/USDT"])
     period: Literal["1m", "5m", "15m", "1h", "4h", "1d"] = "1h"
     limit: int = Field(default=120, ge=30, le=500)
+    model: Literal["deepseek-v4-flash", "deepseek-v4-pro"] | None = Field(default=None)
 
     @field_validator("symbol")
     @classmethod
@@ -188,6 +189,7 @@ class AutoTradingConfigRequest(BaseModel):
 
     enabled: bool = False
     mode: Literal["paper"] = "paper"
+    decision_mode: Literal["strategy", "ai_supervised"] = "strategy"
     symbols: list[str] = Field(default_factory=lambda: ["BTC/USDT", "ETH/USDT", "SOL/USDT"])
     period: Literal["1m", "5m", "15m", "1h", "4h", "1d"] = "1h"
     timeframes: list[Literal["1m", "5m", "15m", "1h", "4h", "1d"]] = Field(default_factory=list)
@@ -197,6 +199,12 @@ class AutoTradingConfigRequest(BaseModel):
     max_order_notional: float = Field(default=1000, ge=1)
     min_order_notional: float = Field(default=10, ge=0)
     confidence_threshold: float = Field(default=0.35, ge=0, le=1)
+    ai_model: Literal["deepseek-v4-flash", "deepseek-v4-pro"] = "deepseek-v4-pro"
+    ai_fallback_model: Literal["deepseek-v4-flash", "deepseek-v4-pro"] = "deepseek-v4-flash"
+    ai_on_new_candle_only: bool = True
+    ai_confidence_threshold: float = Field(default=0.65, ge=0, le=1)
+    stop_loss_pct: float = Field(default=0.02, ge=0.001, le=0.2)
+    take_profit_pct: float = Field(default=0.04, ge=0.001, le=0.5)
     max_daily_loss: float = Field(default=0, ge=0)
     max_consecutive_losses: int = Field(default=0, ge=0, le=100)
     cooldown_minutes: int = Field(default=30, ge=1, le=1440)

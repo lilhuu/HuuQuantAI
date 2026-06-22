@@ -292,6 +292,38 @@ def test_deepseek_signal_provider_accepts_markdown_json(monkeypatch):
     assert captured["request"]["response_format"] == {"type": "json_object"}
 
 
+def test_ai_signal_selected_pro_falls_back_to_flash_before_safe_result(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-test-key")
+    advisor = AiSignalAdvisor(
+        {
+            "enabled": True,
+            "provider": "deepseek",
+            "model": "deepseek-v4-flash",
+            "fallback_model": "deepseek-v4-flash",
+            "api_key_env": "DEEPSEEK_API_KEY",
+        }
+    )
+    calls = []
+
+    def fake_call_provider(**kwargs):
+        calls.append((kwargs["model"], kwargs["execution_mode"]))
+        if kwargs["model"] == "deepseek-v4-pro":
+            raise RuntimeError("pro unavailable")
+        return _advice(action="HOLD", confidence=0.7, suggested_notional=0)
+
+    advisor._call_provider = fake_call_provider
+    result = advisor.analyze(
+        {"symbol": "BTC/USDT"},
+        selected_model="deepseek-v4-pro",
+        fallback_model="deepseek-v4-flash",
+        execution_mode="auto_paper",
+    )
+
+    assert result["model"] == "deepseek-v4-flash"
+    assert calls == [("deepseek-v4-pro", "auto_paper"), ("deepseek-v4-flash", "auto_paper")]
+    assert "PaperBroker" in advisor._system_prompt("auto_paper")
+
+
 def test_ai_advice_missing_fields_becomes_safe_hold():
     result = validate_ai_advice(
         {

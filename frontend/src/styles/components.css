@@ -1030,6 +1030,29 @@ th {
   flex-wrap: wrap;
 }
 
+.ai-chat-drawer--pet .ai-chat-actions {
+  display: grid;
+  grid-template-columns: auto minmax(160px, 1fr) auto auto;
+  align-items: center;
+}
+
+.ai-chat-drawer--pet .ai-chat-draft-count {
+  margin-right: 0;
+}
+
+.ai-chat-send-button {
+  justify-content: center;
+  min-width: 104px;
+  color: #04130f;
+}
+
+.ai-chat-send-button:disabled {
+  opacity: 1;
+  border-color: rgba(20, 217, 210, 0.2);
+  color: #7c8d91;
+  background: rgba(20, 217, 210, 0.08);
+}
+
 .ai-chat-draft-count {
   margin-right: auto;
   color: #7f8498;
@@ -1501,7 +1524,24 @@ th {
 
   .ai-chat-drawer--pet .ai-chat-actions > button,
   .ai-chat-drawer--pet .ai-chat-model-switch {
-    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .ai-chat-drawer--pet .ai-chat-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .ai-chat-drawer--pet .ai-chat-draft-count,
+  .ai-chat-drawer--pet .ai-chat-model-switch {
+    grid-column: 1 / -1;
+  }
+
+  .ai-chat-drawer--pet .ai-chat-model-switch button {
+    flex: 1;
+  }
+
+  .ai-chat-drawer--pet .ai-chat-send-button {
+    width: 100%;
   }
 }
 

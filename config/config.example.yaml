@@ -77,6 +77,7 @@ trading:
 auto_trading:
   enabled: false
   mode: paper
+  decision_mode: ai_supervised
   symbols:
     - BTC/USDT
     - ETH/USDT
@@ -86,9 +87,18 @@ auto_trading:
   scan_interval_seconds: 30
   max_positions: 3
   per_trade_position_ratio: 0.1
-  max_order_notional: 1000
+  max_order_notional: 300
   min_order_notional: 10
   confidence_threshold: 0.35
+  ai_model: deepseek-v4-pro
+  ai_fallback_model: deepseek-v4-flash
+  ai_on_new_candle_only: true
+  ai_confidence_threshold: 0.65
+  stop_loss_pct: 0.02
+  take_profit_pct: 0.04
+  max_daily_loss: 200
+  max_consecutive_losses: 3
+  cooldown_minutes: 60
   real_trading_enabled: false
   strategies:
     - strategy_id: auto_rsi

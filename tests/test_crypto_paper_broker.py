@@ -386,3 +386,39 @@ def test_custom_stop_loss_take_profit_override_defaults():
     assert order.status == "filled"
     assert broker.positions["BTC/USDT"]["stop_loss_price"] == 45000
     assert broker.positions["BTC/USDT"]["take_profit_price"] == 55000
+
+
+def test_ai_protective_exit_persists_and_closes_position(tmp_path):
+    storage_path = tmp_path / "protected-position.db"
+    broker = _broker(
+        storage_path=str(storage_path),
+        persistence_enabled=True,
+        partial_fill_enabled=False,
+        slippage_rate=0,
+    )
+    order = broker.place_order(
+        "BTC/USDT",
+        "BUY",
+        0.01,
+        50000,
+        strategy="ai-supervised:SIG_1",
+        stop_loss_price=49000,
+        take_profit_price=52000,
+    )
+
+    assert order.status == "filled"
+    assert broker.positions["BTC/USDT"]["protection_enabled"] is True
+    assert broker.positions["BTC/USDT"]["source_strategy"] == "ai-supervised:SIG_1"
+
+    restored = _broker(
+        storage_path=str(storage_path),
+        persistence_enabled=True,
+        partial_fill_enabled=False,
+        slippage_rate=0,
+    )
+    exits = restored.process_protective_exits({"BTC/USDT": 48900})
+
+    assert len(exits) == 1
+    assert exits[0]["action"] == "SELL"
+    assert exits[0]["strategy"] == "protective_stop_loss"
+    assert "BTC/USDT" not in restored.positions

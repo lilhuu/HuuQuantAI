@@ -2397,7 +2397,7 @@
 
 .cq-feature-matrix--distinct {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   align-items: start;
 }
@@ -2406,11 +2406,6 @@
 .cq-feature-matrix--distinct > .cq-feature-metrics,
 .cq-feature-matrix--distinct > .cq-distinct-grid {
   grid-column: 1;
-}
-
-.cq-feature-copilot--inline {
-  grid-column: 2;
-  grid-row: 1 / span 3;
 }
 
 .cq-distinct-grid {
@@ -2675,14 +2670,90 @@
   margin-top: 0;
 }
 
+.cq-auto-mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin: 14px 0;
+  padding: 4px;
+  border: 1px solid rgba(107, 116, 150, 0.22);
+  border-radius: 8px;
+  background: rgba(8, 12, 19, 0.86);
+}
+
+.cq-auto-mode-switch button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 6px;
+  color: #aeb7ca;
+  background: transparent;
+  font-weight: 850;
+}
+
+.cq-auto-mode-switch button.active {
+  color: #fff;
+  background: #5142c7;
+}
+
+.cq-auto-acknowledgement {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid rgba(32, 224, 192, 0.26);
+  border-radius: 8px;
+  color: #cbd4e8;
+  background: rgba(9, 52, 49, 0.34);
+  line-height: 1.5;
+}
+
+.cq-auto-acknowledgement input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+}
+
+.cq-auto-supervisor-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.cq-auto-supervisor-grid > div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(80, 88, 116, 0.16);
+  border-radius: 8px;
+  background: rgba(8, 12, 19, 0.72);
+}
+
+.cq-auto-supervisor-grid span,
+.cq-auto-supervisor-grid strong {
+  display: block;
+}
+
+.cq-auto-supervisor-grid span {
+  color: #8792aa;
+  font-size: 12px;
+}
+
+.cq-auto-supervisor-grid strong {
+  overflow-wrap: anywhere;
+  margin-top: 6px;
+  color: #edf2ff;
+  font-size: 14px;
+}
+
+.cq-auto-strategy-heading {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(80, 88, 116, 0.16);
+}
+
 @media (max-width: 1320px) {
   .cq-feature-matrix--distinct {
     grid-template-columns: 1fr;
-  }
-
-  .cq-feature-copilot--inline {
-    grid-column: 1;
-    grid-row: auto;
   }
 
   .cq-feature-grid {
@@ -2692,6 +2763,12 @@
   .cq-feature-copilot {
     position: static;
     min-height: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .cq-auto-supervisor-grid {
+    grid-template-columns: 1fr;
   }
 }
 

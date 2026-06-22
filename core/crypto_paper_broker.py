@@ -319,6 +319,9 @@ class CryptoPaperBrokerExecutor:
             position["last_price"] = fill_price
             position["stop_loss_price"] = float(stop_loss_price or fill_price * 0.98)
             position["take_profit_price"] = float(take_profit_price or fill_price * 1.04)
+            if stop_loss_price is not None or take_profit_price is not None:
+                position["protection_enabled"] = True
+                position["source_strategy"] = order.strategy
             if self.tp_manager is not None:
                 self.tp_manager.register_position(
                     order.symbol,
@@ -372,6 +375,35 @@ class CryptoPaperBrokerExecutor:
             strategy=f"tpsl_{result.trigger_type.value}",
             order_type="MARKET",
         )
+
+    def process_protective_exits(self, mark_prices: Dict[str, float]) -> List[Dict[str, Any]]:
+        """Close protected paper positions when a local stop or target is crossed."""
+        exits: List[Dict[str, Any]] = []
+        for symbol, position in list(self.positions.items()):
+            if not bool(position.get("protection_enabled", False)):
+                continue
+            quantity = float(position.get("available", position.get("quantity", 0)) or 0)
+            current_price = float((mark_prices or {}).get(symbol, 0) or 0)
+            stop_price = float(position.get("stop_loss_price", 0) or 0)
+            target_price = float(position.get("take_profit_price", 0) or 0)
+            if quantity <= 0 or current_price <= 0:
+                continue
+            if stop_price > 0 and current_price <= stop_price:
+                strategy = "protective_stop_loss"
+            elif target_price > 0 and current_price >= target_price:
+                strategy = "protective_take_profit"
+            else:
+                continue
+            order = self.place_order(
+                symbol=symbol,
+                action="SELL",
+                quantity=quantity,
+                price=current_price,
+                strategy=strategy,
+                order_type="MARKET",
+            )
+            exits.append(order.to_response())
+        return exits
 
     def _reject_order(self, order: CryptoPaperOrder, message: str) -> CryptoPaperOrder:
         order.status = "rejected"
@@ -506,6 +538,10 @@ class CryptoPaperBrokerExecutor:
                         available TEXT NOT NULL,
                         avg_price TEXT NOT NULL,
                         last_price TEXT NOT NULL,
+                        stop_loss_price TEXT NOT NULL DEFAULT '0',
+                        take_profit_price TEXT NOT NULL DEFAULT '0',
+                        protection_enabled INTEGER NOT NULL DEFAULT 0,
+                        source_strategy TEXT NOT NULL DEFAULT '',
                         updated_at TEXT NOT NULL
                     );
                     CREATE TABLE IF NOT EXISTS crypto_paper_trades (
@@ -549,6 +585,7 @@ class CryptoPaperBrokerExecutor:
                         ON crypto_paper_logs(event, timestamp);
                     """
                 )
+                self._ensure_position_columns(conn)
             self._persistence_ready = True
         except Exception as exc:
             self.persistence_enabled = False
@@ -564,6 +601,21 @@ class CryptoPaperBrokerExecutor:
                     "payload": {},
                 }
             )
+
+    def _ensure_position_columns(self, conn: sqlite3.Connection) -> None:
+        existing = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(crypto_paper_positions)").fetchall()
+        }
+        required = {
+            "stop_loss_price": "TEXT NOT NULL DEFAULT '0'",
+            "take_profit_price": "TEXT NOT NULL DEFAULT '0'",
+            "protection_enabled": "INTEGER NOT NULL DEFAULT 0",
+            "source_strategy": "TEXT NOT NULL DEFAULT ''",
+        }
+        for name, definition in required.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE crypto_paper_positions ADD COLUMN {name} {definition}")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.storage_path, timeout=30)
@@ -635,6 +687,10 @@ class CryptoPaperBrokerExecutor:
                     "available": self._to_float(row["available"]),
                     "avg_price": self._to_float(row["avg_price"]),
                     "last_price": self._to_float(row["last_price"]),
+                    "stop_loss_price": self._to_float(row["stop_loss_price"]),
+                    "take_profit_price": self._to_float(row["take_profit_price"]),
+                    "protection_enabled": bool(row["protection_enabled"]),
+                    "source_strategy": str(row["source_strategy"] or ""),
                 }
                 for row in conn.execute("SELECT * FROM crypto_paper_positions ORDER BY symbol")
             }
@@ -766,13 +822,18 @@ class CryptoPaperBrokerExecutor:
             conn.executemany(
                 """
                 INSERT INTO crypto_paper_positions
-                    (symbol, quantity, available, avg_price, last_price, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (symbol, quantity, available, avg_price, last_price, stop_loss_price,
+                     take_profit_price, protection_enabled, source_strategy, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(symbol) DO UPDATE SET
                     quantity = excluded.quantity,
                     available = excluded.available,
                     avg_price = excluded.avg_price,
                     last_price = excluded.last_price,
+                    stop_loss_price = excluded.stop_loss_price,
+                    take_profit_price = excluded.take_profit_price,
+                    protection_enabled = excluded.protection_enabled,
+                    source_strategy = excluded.source_strategy,
                     updated_at = excluded.updated_at
                 """,
                 [
@@ -782,6 +843,10 @@ class CryptoPaperBrokerExecutor:
                         self._text(position.get("available", 0)),
                         self._text(position.get("avg_price", 0)),
                         self._text(position.get("last_price", 0)),
+                        self._text(position.get("stop_loss_price", 0)),
+                        self._text(position.get("take_profit_price", 0)),
+                        1 if bool(position.get("protection_enabled", False)) else 0,
+                        str(position.get("source_strategy") or ""),
                         now,
                     )
                     for symbol, position in self.positions.items()

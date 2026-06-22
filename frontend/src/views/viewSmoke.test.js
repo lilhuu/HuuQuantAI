@@ -216,6 +216,7 @@ describe("view smoke tests", () => {
 
     expect(wrapper.find("[data-copilot-pet]").exists()).toBe(true);
     expect(wrapper.find("[data-copilot-panel]").exists()).toBe(false);
+    expect(wrapper.find('[data-copilot-toggle="pet"]').exists()).toBe(false);
     expect(wrapper.classes()).not.toContain("cq-shell--copilot-open");
 
     await wrapper.find("[data-copilot-pet]").trigger("click");
@@ -272,6 +273,8 @@ describe("view smoke tests", () => {
     });
 
     expect(wrapper.find('[data-ai-drawer-send="message"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.find('[data-ai-drawer-send="message"]').text()).toBe("发送");
+    expect(wrapper.find('[data-ai-drawer-send="message"]').classes()).toContain("ai-chat-send-button");
 
     await wrapper.find('[data-ai-drawer-input="message"]').setValue("解释当前页面");
 
@@ -413,7 +416,7 @@ describe("view smoke tests", () => {
       global: { plugins: [pinia], stubs: { CryptoKlineChart: true, BacktestChart: true } },
     });
     expect(market.find('[data-feature-role="market-intelligence"]').exists()).toBe(true);
-    expect(market.find(".cq-feature-copilot").exists()).toBe(true);
+    expect(market.find(".cq-feature-copilot").exists()).toBe(false);
     market.unmount();
 
     const strategy = shallowMount(FeatureCommandView, {
@@ -431,6 +434,27 @@ describe("view smoke tests", () => {
     expect(backtest.find('[data-feature-role="backtest-center"]').exists()).toBe(true);
     expect(backtest.find('[data-feature-role="strategy-lab"]').exists()).toBe(false);
     backtest.unmount();
+
+    const dashboard = shallowMount(FeatureCommandView, {
+      props: { feature: "dashboard" },
+      global: { plugins: [pinia], stubs: { CryptoKlineChart: true, BacktestChart: true } },
+    });
+    expect(dashboard.text()).not.toContain("问 AI");
+    dashboard.unmount();
+  });
+
+  it("renders AI paper supervision controls and an explicit start acknowledgement", () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const wrapper = shallowMount(FeatureCommandView, {
+      props: { feature: "auto" },
+      global: { plugins: [pinia], stubs: { CryptoKlineChart: true, BacktestChart: true } },
+    });
+
+    expect(wrapper.find('[data-auto-decision-mode="ai_supervised"]').exists()).toBe(true);
+    expect(wrapper.find('[data-ai-supervisor-status]').exists()).toBe(true);
+    expect(wrapper.find('[data-ai-supervisor-ack]').exists()).toBe(true);
+    wrapper.unmount();
   });
 
   it("renders a Binance Spot market table and loads details for the selected symbol only", async () => {

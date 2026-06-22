@@ -560,8 +560,24 @@ def test_ai_signal_analyze_list_get_and_provider_failures(tmp_path):
     service.ai_advisor.analyze = MagicMock(return_value=_advice("BUY", 0.8, 200))
     service.ai_store.save_signal = MagicMock(return_value=_ai_record())
 
-    result = asyncio.run(service.analyze_ai_signal(AiSignalAnalyzeRequest(symbol="BTC/USDT", period="1h", limit=30)))
+    result = asyncio.run(
+        service.analyze_ai_signal(
+            AiSignalAnalyzeRequest(symbol="BTC/USDT", period="1h", limit=30, model="deepseek-v4-pro"),
+            strategy_candidate={"symbol": "BTC/USDT", "action": "BUY", "confidence": 0.7, "strategy_id": "rsi"},
+            execution_mode="auto_paper",
+            fallback_model="deepseek-v4-flash",
+        )
+    )
     assert result.signal.approval_status == "approved"
+    advisor_call = service.ai_advisor.analyze.call_args
+    assert advisor_call.args[0]["strategy_candidate"]["strategy_id"] == "rsi"
+    assert advisor_call.args[0]["ai_limits"]["auto_paper_order_enabled"] is True
+    assert advisor_call.args[0]["ai_limits"]["real_trading_allowed"] is False
+    assert advisor_call.kwargs == {
+        "selected_model": "deepseek-v4-pro",
+        "fallback_model": "deepseek-v4-flash",
+        "execution_mode": "auto_paper",
+    }
 
     service.ai_advisor.analyze = MagicMock(side_effect=ValueError("bad json"))
     service.ai_store.save_signal = MagicMock(return_value=_ai_record(approval_status="failed", approval_reason="bad json"))

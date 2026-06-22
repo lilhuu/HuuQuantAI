@@ -1,6 +1,5 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
-import { useRouter } from "vue-router";
 
 import BacktestChart from "./BacktestChart.vue";
 import CryptoKlineChart from "./CryptoKlineChart.vue";
@@ -20,7 +19,6 @@ const props = defineProps({
   },
 });
 
-const router = useRouter();
 const aiStore = useAiAdvisorStore();
 const autoStore = useAutoTradingStore();
 const marketStore = useMarketStore();
@@ -43,6 +41,7 @@ const orderForm = reactive({
   strategy: "manual_ai_review",
 });
 const autoSymbolsText = ref((autoStore.configDraft.symbols || ["BTC/USDT", "ETH/USDT", "SOL/USDT"]).join(", "));
+const aiSupervisorAcknowledged = ref(false);
 const strategyForm = reactive({
   symbolsText: "BTC/USDT,ETH/USDT,SOL/USDT",
   period: "1h",
@@ -183,6 +182,9 @@ const orders = computed(() => systemStore.cryptoOrders || []);
 const positions = computed(() => systemStore.cryptoPositions || []);
 const logs = computed(() => systemStore.cryptoLogs || []);
 const decisions = computed(() => autoStore.decisions || []);
+const aiSupervisor = computed(() => autoStore.aiSupervisor || {});
+const isAiSupervised = computed(() => autoStore.configDraft.decision_mode === "ai_supervised");
+const canStartAuto = computed(() => !isAiSupervised.value || aiSupervisorAcknowledged.value);
 const topQuotes = computed(() => [...(marketStore.cryptoQuotes || [])].slice(0, 8));
 const fullMarketQuotes = computed(() => marketStore.paginatedQuotes || []);
 const marketQuoteStart = computed(() => (marketStore.quotesTotal ? (marketStore.quotePage - 1) * marketStore.quotePageSize + 1 : 0));
@@ -265,14 +267,6 @@ function pct(value) {
 
 function setModelMode(mode) {
   modelMode.value = mode === "Pro" ? "Pro" : "Flash";
-}
-
-function goAi() {
-  router.push({ name: "ai-advisor" });
-}
-
-function goTrade() {
-  router.push({ name: "trade" });
 }
 
 function useQuotePrice() {
@@ -402,8 +396,17 @@ async function saveAutoConfig() {
 }
 
 async function startAuto() {
+  if (!canStartAuto.value) {
+    formMessage.value = "请先确认 AI 只操作 PaperBroker 模拟账户。";
+    return;
+  }
   autoStore.setSymbolsText(autoSymbolsText.value);
   await autoStore.start();
+}
+
+function setDecisionMode(mode) {
+  autoStore.configDraft.decision_mode = mode === "strategy" ? "strategy" : "ai_supervised";
+  aiSupervisorAcknowledged.value = false;
 }
 
 async function runAutoScan() {
@@ -556,7 +559,6 @@ onBeforeUnmount(() => {
         <button class="cq-command-button cq-command-button--primary" type="button" @click="refreshFeature">
           {{ meta.primary }}
         </button>
-        <button class="cq-command-button" type="button" @click="goAi">问 AI</button>
       </div>
     </header>
 
@@ -882,6 +884,20 @@ onBeforeUnmount(() => {
     <div v-else-if="feature === 'auto'" class="cq-distinct-grid cq-distinct-grid--auto" data-feature-role="auto-decision-pipeline">
       <article class="cq-feature-panel">
         <div class="cq-panel-headline"><div><span>自动交易配置</span><h2>扫描控制台</h2></div><b>{{ autoStore.stateLabel }}</b></div>
+        <div class="cq-auto-mode-switch" aria-label="自动交易决策模式">
+          <button
+            type="button"
+            data-auto-decision-mode="strategy"
+            :class="{ active: !isAiSupervised }"
+            @click="setDecisionMode('strategy')"
+          >规则自动</button>
+          <button
+            type="button"
+            data-auto-decision-mode="ai_supervised"
+            :class="{ active: isAiSupervised }"
+            @click="setDecisionMode('ai_supervised')"
+          >AI 模拟托管</button>
+        </div>
         <div class="cq-form-stack">
           <label><span>交易对</span><input v-model="autoSymbolsText" /></label>
           <label><span>周期</span><select v-model="autoStore.configDraft.period"><option v-for="period in periods" :key="period">{{ period }}</option></select></label>
@@ -889,16 +905,35 @@ onBeforeUnmount(() => {
           <label><span>最大持仓数</span><input v-model.number="autoStore.configDraft.max_positions" type="number" /></label>
           <label><span>单笔上限 USDT</span><input v-model.number="autoStore.configDraft.max_order_notional" type="number" /></label>
           <label><span>置信度阈值</span><input v-model.number="autoStore.configDraft.confidence_threshold" type="number" step="0.05" /></label>
+          <label v-if="isAiSupervised"><span>AI 置信度</span><input v-model.number="autoStore.configDraft.ai_confidence_threshold" type="number" step="0.05" /></label>
+          <label v-if="isAiSupervised"><span>日亏损上限</span><input v-model.number="autoStore.configDraft.max_daily_loss" type="number" /></label>
         </div>
+        <label v-if="isAiSupervised" class="cq-auto-acknowledgement">
+          <input v-model="aiSupervisorAcknowledged" data-ai-supervisor-ack type="checkbox" />
+          <span>我确认 AI 仅操作 PaperBroker 模拟账户，真实交易保持关闭。</span>
+        </label>
         <div class="cq-button-row">
           <button class="cq-command-button" type="button" @click="saveAutoConfig">保存</button>
-          <button class="cq-command-button" type="button" @click="startAuto">启动</button>
+          <button class="cq-command-button" type="button" :disabled="!canStartAuto" @click="startAuto">启动</button>
           <button class="cq-command-button" type="button" @click="autoStore.pause()">暂停</button>
           <button class="cq-command-button cq-command-button--primary" type="button" @click="runAutoScan">扫描</button>
         </div>
+        <p v-if="formMessage" class="cq-feature-copy">{{ formMessage }}</p>
       </article>
-      <article class="cq-feature-panel">
-        <div class="cq-panel-headline"><div><span>策略组合</span><h2>已配置策略</h2></div></div>
+      <article class="cq-feature-panel cq-span-2" data-ai-supervisor-status>
+        <div class="cq-panel-headline">
+          <div><span>AI 托管状态</span><h2>{{ isAiSupervised ? "DeepSeek 最终裁决" : "规则策略执行" }}</h2></div>
+          <b>{{ aiSupervisor.last_action || "HOLD" }}</b>
+        </div>
+        <div class="cq-auto-supervisor-grid">
+          <div><span>主模型</span><strong>{{ autoStore.configDraft.ai_model || "deepseek-v4-pro" }}</strong></div>
+          <div><span>备用模型</span><strong>{{ autoStore.configDraft.ai_fallback_model || "deepseek-v4-flash" }}</strong></div>
+          <div><span>最近 K 线</span><strong>{{ compactTime(aiSupervisor.last_candle_at) }}</strong></div>
+          <div><span>Provider 失败</span><strong>{{ aiSupervisor.provider_failure_count || 0 }} / 3</strong></div>
+          <div><span>保护退出</span><strong>止损 2% / 止盈 4%</strong></div>
+          <div><span>重启行为</span><strong>需要手动重新开启</strong></div>
+        </div>
+        <div class="cq-panel-headline cq-auto-strategy-heading"><div><span>候选来源</span><h2>已配置策略</h2></div></div>
         <div class="cq-strategy-stack">
           <div v-for="strategy in autoStore.configDraft.strategies" :key="strategy.strategy_id">
             <strong>{{ strategy.strategy_id }}</strong>
@@ -1187,36 +1222,5 @@ onBeforeUnmount(() => {
       </article>
     </div>
 
-    <aside class="cq-feature-copilot cq-feature-copilot--inline">
-      <div class="cq-feature-copilot__head">
-        <img src="/assets/huuquant-bot.png" alt="HuuQuantAI" />
-        <div>
-          <span>{{ meta.intent }} AI 副驾驶</span>
-          <strong>只做建议，不直接下单</strong>
-        </div>
-      </div>
-      <div class="cq-feature-copilot__message">
-        <b>{{ meta.prompt }}</b>
-        <p>
-          当前 {{ selectedSymbol }} 最新价 {{ latestPrice ? formatPrice(latestPrice) : "--" }}，
-          账户现金 {{ formatCurrency(systemStore.liveCash) }}。所有交易动作都必须经过本地审批和人工确认。
-        </p>
-      </div>
-      <div class="cq-feature-model-switch">
-        <span>模型</span>
-        <strong>DeepSeek V4</strong>
-        <div>
-          <button type="button" :class="{ active: modelMode === 'Flash' }" @click="setModelMode('Flash')">Flash</button>
-          <button type="button" :class="{ active: modelMode === 'Pro' }" @click="setModelMode('Pro')">Pro</button>
-        </div>
-        <small>切换仅影响当前 AI 辅助展示偏好。</small>
-      </div>
-      <button class="cq-command-button cq-command-button--primary cq-feature-full-button" type="button" @click="goAi">
-        打开 AI 助手
-      </button>
-      <button class="cq-command-button cq-feature-full-button" type="button" @click="goTrade">
-        查看模拟交易
-      </button>
-    </aside>
   </section>
 </template>
