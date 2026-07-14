@@ -100,7 +100,11 @@ from core.binance_public_market_provider import (
     normalize_instrument_symbol,
     normalize_market_type,
 )
-from core.crypto_market_data_provider import CryptoMarketDataProvider, normalize_crypto_symbol
+from core.crypto_market_data_provider import (
+    CryptoMarketDataProvider,
+    crypto_timeframe_seconds,
+    normalize_crypto_symbol,
+)
 from core.crypto_paper_broker import CryptoPaperBrokerExecutor
 from core.crypto_backtest_engine import CryptoBacktestEngine
 from core.crypto_strategy_engine import CryptoStrategyEngine
@@ -164,7 +168,11 @@ class CryptoService:
             auto_config["symbols"] = self.default_symbols
         risk_config = self.config.get("risk", {}) or {}
         auto_config.setdefault("max_order_notional", risk_config.get("max_order_notional", 1000))
-        self.auto_trading_engine = AutoTradingEngine(auto_config)
+        self.auto_trading_engine = AutoTradingEngine(
+            auto_config,
+            risk_state_loader=self.paper_broker.load_auto_risk_state,
+            risk_state_saver=self.paper_broker.save_auto_risk_state,
+        )
         self.ai_supervisor = AiPaperSupervisorRuntime(max_provider_failures=3)
         macro_config = dict(crypto_config.get("macro", {}) or {})
         self.macro_provider = MacroDataProvider(
@@ -215,9 +223,9 @@ class CryptoService:
 
         try:
             if target_symbols:
-                rows = self.provider.fetch_quotes(target_symbols)
+                rows = await asyncio.to_thread(self.provider.fetch_quotes, target_symbols)
             else:
-                rows = self.provider.fetch_all_tickers(quote=quote_filter)
+                rows = await asyncio.to_thread(self.provider.fetch_all_tickers, quote=quote_filter)
             self.record_quote_snapshots(rows)
         except Exception as exc:
             if target_symbols:
@@ -297,14 +305,9 @@ class CryptoService:
         should_refresh_markets = total == 0 or str(quote or "").strip().upper() == "ALL"
         if should_refresh_markets:
             try:
-                markets = await asyncio.get_event_loop().run_in_executor(
-                    None, self.provider.load_markets, False
-                )
+                markets = await asyncio.to_thread(self.provider.load_markets, False)
             except Exception:
-                try:
-                    markets = self.provider.load_markets(reload=False)
-                except Exception:
-                    markets = {}
+                markets = []
             if markets:
                 self.market_cache.upsert_exchange_info(markets)
                 items, total = self.market_cache.get_symbols(
@@ -325,7 +328,13 @@ class CryptoService:
             if not normalized_symbol:
                 raise ApiError(400, "symbol is required", ErrorCode.BAD_REQUEST)
             try:
-                rows = self.public_provider.fetch_klines(normalized_market_type, normalized_symbol, period=period, limit=limit)
+                rows = await asyncio.to_thread(
+                    self.public_provider.fetch_klines,
+                    normalized_market_type,
+                    normalized_symbol,
+                    period=period,
+                    limit=limit,
+                )
             except ValueError as exc:
                 raise ApiError(400, str(exc), ErrorCode.BAD_REQUEST) from exc
             except Exception as exc:
@@ -347,7 +356,12 @@ class CryptoService:
         if not normalized_symbol:
             raise ApiError(400, "symbol is required", ErrorCode.BAD_REQUEST)
         try:
-            rows = self.provider.fetch_ohlcv(normalized_symbol, timeframe=period, limit=limit)
+            rows = await asyncio.to_thread(
+                self.provider.fetch_ohlcv,
+                normalized_symbol,
+                timeframe=period,
+                limit=limit,
+            )
             self.record_klines(rows)
         except ValueError as exc:
             raise ApiError(400, str(exc), ErrorCode.BAD_REQUEST) from exc
@@ -386,7 +400,12 @@ class CryptoService:
             if not normalized_symbol:
                 raise ApiError(400, "symbol is required", ErrorCode.BAD_REQUEST)
             try:
-                book = self.public_provider.fetch_order_book(normalized_market_type, normalized_symbol, limit=limit)
+                book = await asyncio.to_thread(
+                    self.public_provider.fetch_order_book,
+                    normalized_market_type,
+                    normalized_symbol,
+                    limit=limit,
+                )
             except ValueError as exc:
                 raise ApiError(400, str(exc), ErrorCode.BAD_REQUEST) from exc
             except Exception as exc:
@@ -400,7 +419,11 @@ class CryptoService:
         if not normalized_symbol:
             raise ApiError(400, "symbol is required", ErrorCode.BAD_REQUEST)
         try:
-            book = self.provider.fetch_order_book(normalized_symbol, limit=limit)
+            book = await asyncio.to_thread(
+                self.provider.fetch_order_book,
+                normalized_symbol,
+                limit=limit,
+            )
         except ValueError as exc:
             raise ApiError(400, str(exc), ErrorCode.BAD_REQUEST) from exc
         except Exception as exc:
@@ -417,7 +440,11 @@ class CryptoService:
         if not normalized_symbol:
             raise ApiError(400, "symbol is required", ErrorCode.BAD_REQUEST)
         try:
-            metrics = self.public_provider.fetch_derivative_metrics(normalized_market_type, normalized_symbol)
+            metrics = await asyncio.to_thread(
+                self.public_provider.fetch_derivative_metrics,
+                normalized_market_type,
+                normalized_symbol,
+            )
         except ValueError as exc:
             raise ApiError(400, str(exc), ErrorCode.BAD_REQUEST) from exc
         except Exception as exc:
@@ -447,11 +474,18 @@ class CryptoService:
         if target_symbols is not None and len(target_symbols) == 0:
             return CryptoQuotesResponse(items=[], count=0, source=f"binance_{market_type}")
         try:
-            rows = (
-                self.public_provider.fetch_quotes(market_type, target_symbols)
-                if target_symbols
-                else self.public_provider.fetch_all_tickers(market_type, quote=quote_filter)
-            )
+            if target_symbols:
+                rows = await asyncio.to_thread(
+                    self.public_provider.fetch_quotes,
+                    market_type,
+                    target_symbols,
+                )
+            else:
+                rows = await asyncio.to_thread(
+                    self.public_provider.fetch_all_tickers,
+                    market_type,
+                    quote=quote_filter,
+                )
             self.market_cache.upsert_market_quotes(rows, market_type=market_type)
         except Exception as exc:
             if target_symbols:
@@ -529,14 +563,9 @@ class CryptoService:
         )
         if total == 0 or str(quote or "").strip().upper() == "ALL":
             try:
-                markets = await asyncio.get_event_loop().run_in_executor(
-                    None, self.public_provider.load_markets, market_type
-                )
+                markets = await asyncio.to_thread(self.public_provider.load_markets, market_type)
             except Exception:
-                try:
-                    markets = self.public_provider.load_markets(market_type)
-                except Exception:
-                    markets = []
+                markets = []
             if markets:
                 self.market_cache.upsert_instruments(markets, market_type=market_type)
                 items, total = self.market_cache.get_instruments(
@@ -578,21 +607,21 @@ class CryptoService:
             open_interest_current = None
 
             try:
-                funding = self.provider.fetch_funding_rate(symbol)
+                funding = await asyncio.to_thread(self.provider.fetch_funding_rate, symbol)
                 if funding:
                     funding_rate = float(funding.get("funding_rate", 0) or 0)
             except Exception:
                 funding_rate = None
 
             try:
-                open_interest = self.provider.fetch_open_interest(symbol)
+                open_interest = await asyncio.to_thread(self.provider.fetch_open_interest, symbol)
                 if open_interest:
                     open_interest_current = float(open_interest.get("open_interest", 0) or 0)
             except Exception:
                 open_interest_current = None
 
             try:
-                orderbook = self.provider.fetch_order_book(symbol, limit=5)
+                orderbook = await asyncio.to_thread(self.provider.fetch_order_book, symbol, limit=5)
                 if orderbook:
                     orderbook_bid_depth = sum(float(level[1] or 0) for level in (orderbook.get("bids") or [])[:5])
                     orderbook_ask_depth = sum(float(level[1] or 0) for level in (orderbook.get("asks") or [])[:5])
@@ -954,6 +983,7 @@ class CryptoService:
                     "strategy_id": strategy_id,
                     "reason": str(signal.response.get("reason") or signal.approval_reason or "AI final decision"),
                     "adjusted_position_ratio": approved_notional / equity if equity > 0 else 0,
+                    "approved_notional_usdt": approved_notional,
                 }
             )
 
@@ -1019,11 +1049,23 @@ class CryptoService:
         return self._auto_status_response()
 
     async def _latest_ai_candle_time(self, symbol: str, period: str) -> str:
-        response = await self.get_klines(symbol=symbol, period=period, limit=2)
-        if not response.items:
-            raise RuntimeError(f"closed K-line unavailable for {symbol}")
+        response = await self.get_klines(symbol=symbol, period=period, limit=3)
+        closed = self._validated_ai_candles(response, period, require_live=True)
+        return str(closed[-1].end_time)
+
+    @staticmethod
+    def _validated_ai_candles(
+        response: CryptoKLinesResponse,
+        period: str,
+        *,
+        require_live: bool,
+    ) -> list[CryptoKLineResponse]:
+        source = str(response.source or "").strip().lower()
+        if require_live and (source.startswith("cache") or source in {"", "unavailable"}):
+            raise RuntimeError(f"live K-line unavailable for {response.symbol}")
+
         now = datetime.now(timezone.utc)
-        closed = []
+        closed: list[tuple[datetime, CryptoKLineResponse]] = []
         for item in response.items:
             try:
                 end_time = datetime.fromisoformat(str(item.end_time).replace("Z", "+00:00"))
@@ -1032,10 +1074,16 @@ class CryptoService:
             if end_time.tzinfo is None:
                 end_time = end_time.replace(tzinfo=timezone.utc)
             if end_time <= now:
-                closed.append((end_time, str(item.end_time)))
+                closed.append((end_time, item))
         if not closed:
-            raise RuntimeError(f"closed K-line unavailable for {symbol}")
-        return max(closed, key=lambda row: row[0])[1]
+            raise RuntimeError(f"closed K-line unavailable for {response.symbol}")
+
+        closed.sort(key=lambda row: row[0])
+        if require_live:
+            max_age_seconds = crypto_timeframe_seconds(period) * 2 + 60
+            if (now - closed[-1][0]).total_seconds() > max_age_seconds:
+                raise RuntimeError(f"stale K-line unavailable for {response.symbol}")
+        return [item for _, item in closed]
 
     async def _process_ai_protective_exits(self) -> None:
         protected_symbols = [
@@ -1320,6 +1368,11 @@ class CryptoService:
         try:
             quote_response = await self.get_quotes([symbol])
             kline_response = await self.get_klines(symbol=symbol, period=request.period, limit=limit)
+            ai_klines = self._validated_ai_candles(
+                kline_response,
+                request.period,
+                require_live=execution_mode == "auto_paper",
+            )
             account = self.paper_broker.get_account_info()
             positions = self.paper_broker.get_positions()
             recent_orders = self.paper_broker.get_orders(limit=20, offset=0)["items"]
@@ -1333,7 +1386,7 @@ class CryptoService:
                 symbol=symbol,
                 period=request.period,
                 quote=quote,
-                klines=[item.model_dump() for item in kline_response.items],
+                klines=[item.model_dump() for item in ai_klines],
                 account=account,
                 positions=positions,
                 recent_orders=recent_orders,
@@ -1358,14 +1411,15 @@ class CryptoService:
                     "real_trading_allowed": False,
                 }
             if request.model or execution_mode != "advisory" or fallback_model:
-                advice = self.ai_advisor.analyze(
+                advice = await asyncio.to_thread(
+                    self.ai_advisor.analyze,
                     context,
                     selected_model=request.model,
                     fallback_model=fallback_model,
                     execution_mode=execution_mode,
                 )
             else:
-                advice = self.ai_advisor.analyze(context)
+                advice = await asyncio.to_thread(self.ai_advisor.analyze, context)
         except ApiError:
             raise
         except ValueError as exc:
@@ -2113,7 +2167,8 @@ class CryptoService:
         return AiChatMessageResponse(**record)
 
     async def get_connection_health(self) -> ConnectionHealthResponse:
-        return ConnectionHealthResponse(**self.provider.get_connection_health())
+        health = await asyncio.to_thread(self.provider.get_connection_health)
+        return ConnectionHealthResponse(**health)
 
     async def _load_strategy_market_data(self, symbols: list[str], period: str, limit: int) -> dict[str, list[dict[str, Any]]]:
         normalized_symbols = self._normalize_symbols(symbols)

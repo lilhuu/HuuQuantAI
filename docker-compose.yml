@@ -2,10 +2,11 @@ services:
   huuquantai:
     build: .
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       AUTO_TRADER_HOST: 0.0.0.0
       AUTO_TRADER_PORT: 8000
+      HUU_BOOTSTRAP_TOKEN: ${HUU_BOOTSTRAP_TOKEN:?Set HUU_BOOTSTRAP_TOKEN before starting Docker}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       FRED_API_KEY: ${FRED_API_KEY:-}
       BINANCE_TESTNET_API_KEY: ${BINANCE_TESTNET_API_KEY:-}

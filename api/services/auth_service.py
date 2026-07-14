@@ -21,9 +21,15 @@ from core.app_state import AppStateStore
 class AuthService:
     """Manage local users, sessions, and persisted user preferences."""
 
-    def __init__(self, storage_path: str = "data/app_state.db", session_hours: int = 168):
+    def __init__(
+        self,
+        storage_path: str = "data/app_state.db",
+        session_hours: int = 168,
+        bootstrap_token: str | None = None,
+    ):
         self.storage = AppStateStore(storage_path)
         self.session_hours = max(int(session_hours), 1)
+        self.bootstrap_token = str(bootstrap_token or "").strip()
         self._lock = threading.RLock()
         self._login_failures: dict[str, dict[str, Any]] = {}
         self._max_login_failures = 5
@@ -37,10 +43,19 @@ class AuthService:
             user=self._build_user_response(user) if user else None,
         )
 
-    def bootstrap_user(self, username: str, password: str, display_name: Optional[str] = None) -> AuthSessionResponse:
+    def bootstrap_user(
+        self,
+        username: str,
+        password: str,
+        display_name: Optional[str] = None,
+        bootstrap_token: str | None = None,
+    ) -> AuthSessionResponse:
         with self._lock:
             if self.storage.count_users() > 0:
                 raise ValueError("系统已经完成初始化，请直接登录。")
+            supplied_token = str(bootstrap_token or "").strip()
+            if self.bootstrap_token and not hmac.compare_digest(supplied_token, self.bootstrap_token):
+                raise PermissionError("管理员初始化令牌无效。")
 
             salt = secrets.token_hex(16)
             password_hash = self._hash_password(password, salt)

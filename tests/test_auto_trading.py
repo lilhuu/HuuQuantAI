@@ -39,6 +39,30 @@ def test_decision_pipeline_builds_staged_ready_decision():
     assert [step["name"] for step in decision["steps"]][-1] == "submit"
 
 
+def test_decision_pipeline_limits_sell_to_approved_notional():
+    engine = AutoTradingEngine({"symbols": ["BTC/USDT"], "confidence_threshold": 0.2})
+    pipeline = DecisionPipeline(engine.config, engine.risk_state, cooldown_active=False)
+
+    decision = pipeline.build_one(
+        symbol="BTC/USDT",
+        action="SELL",
+        price=50_000,
+        confidence=0.8,
+        strategy_id="ai:signal-1",
+        reason="approved partial reduction",
+        candidate={"approved_notional_usdt": 300},
+        equity=10_000,
+        cash=9_000,
+        positions={"BTC/USDT": {"quantity": 0.02, "available": 0.02}},
+        current_position_count=1,
+        place_orders=True,
+    )
+
+    assert decision["status"] == "ready"
+    assert decision["quantity"] == 0.006
+    assert decision["notional"] == 300
+
+
 def test_auto_trading_blocks_real_switch_and_builds_buy_decision():
     blocked_engine = AutoTradingEngine({"symbols": ["BTC/USDT"]})
     blocked_engine.config.real_trading_enabled = True
@@ -189,6 +213,46 @@ def test_auto_trading_consecutive_losses_trigger_kill_switch():
     assert status["risk_state"]["consecutive_losses"] == 2
     assert status["risk_state"]["kill_switch_active"] is True
     assert "consecutive losses" in status["risk_state"]["reason"]
+
+
+def test_crypto_service_restores_persisted_auto_risk_state(tmp_path):
+    db_path = tmp_path / "risk_restart.db"
+    config = {
+        "crypto": {"symbols": ["BTC/USDT"]},
+        "auto_trading": {
+            "symbols": ["BTC/USDT"],
+            "max_daily_loss": 100,
+            "max_consecutive_losses": 3,
+            "cooldown_minutes": 30,
+        },
+        "storage": {"db_path": str(db_path)},
+    }
+    first = CryptoService(config)
+    first.auto_trading_engine.start()
+    first.auto_trading_engine.build_order_decisions(
+        {"summary": []},
+        {"equity": 10_000, "cash": 10_000},
+        [],
+    )
+    first.auto_trading_engine.record_order_result(
+        {},
+        {"status": "filled", "realized_pnl": -10, "message": "loss"},
+    )
+    first.auto_trading_engine.build_order_decisions(
+        {"summary": []},
+        {"equity": 9_850, "cash": 9_850},
+        [],
+    )
+    before = first.auto_trading_engine.status()["risk_state"]
+
+    restarted = CryptoService(config)
+    after = restarted.auto_trading_engine.status()["risk_state"]
+
+    assert after == before
+    assert after["daily_pnl"] == -150
+    assert after["consecutive_losses"] == 1
+    assert after["kill_switch_active"] is True
+    assert restarted.auto_trading_engine.start()["state"] == "paused"
 
 
 def test_auto_trading_api_status_config_and_scan(monkeypatch, tmp_path):

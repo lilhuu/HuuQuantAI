@@ -22,6 +22,22 @@ SUPPORTED_TIMEFRAMES = {
     "1d": "1d",
 }
 
+TIMEFRAME_MILLISECONDS = {
+    "1m": 60_000,
+    "5m": 5 * 60_000,
+    "15m": 15 * 60_000,
+    "1h": 60 * 60_000,
+    "4h": 4 * 60 * 60_000,
+    "1d": 24 * 60 * 60_000,
+}
+
+
+def crypto_timeframe_seconds(value: Any) -> int:
+    timeframe = SUPPORTED_TIMEFRAMES.get(str(value or "1h"))
+    if not timeframe:
+        raise ValueError(f"unsupported crypto timeframe: {value}")
+    return TIMEFRAME_MILLISECONDS[timeframe] // 1000
+
 
 def normalize_crypto_symbol(value: Any, quote_currency: str = "USDT") -> str:
     """Normalize common crypto symbol spellings to BASE/QUOTE."""
@@ -222,13 +238,16 @@ class CryptoMarketDataProvider:
         for row in rows or []:
             timestamp_ms, open_price, high, low, close, volume = list(row)[:6]
             start = self._iso_from_ms(timestamp_ms)
+            end = self._iso_from_ms(
+                int(timestamp_ms) + TIMEFRAME_MILLISECONDS[normalized_timeframe] - 1
+            )
             amount = float(close or 0) * float(volume or 0)
             items.append(
                 {
                     "symbol": normalized_symbol,
                     "period": normalized_timeframe,
                     "start_time": start,
-                    "end_time": start,
+                    "end_time": end,
                     "open": float(open_price or 0),
                     "high": float(high or 0),
                     "low": float(low or 0),

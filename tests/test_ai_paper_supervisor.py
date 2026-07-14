@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -35,7 +36,9 @@ def _strategy_result():
     return result
 
 
-def _kline(end_time="2026-06-21T00:59:59Z"):
+def _kline(end_time=None):
+    if end_time is None:
+        end_time = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
     return CryptoKLineResponse(
         symbol="BTC/USDT",
         period="1h",
@@ -165,6 +168,53 @@ def test_ai_supervisor_runtime_deduplicates_candles_and_blocks_after_three_failu
     assert runtime.status()["blocked_reason"] == "three"
 
 
+def test_ai_candle_validation_excludes_open_candle(tmp_path):
+    service = _service(tmp_path)
+    now = datetime.now(timezone.utc)
+    closed = _kline((now - timedelta(minutes=5)).isoformat())
+    current = _kline((now + timedelta(minutes=55)).isoformat())
+    response = CryptoKLinesResponse(
+        symbol="BTC/USDT",
+        period="1h",
+        items=[closed, current],
+        count=2,
+        source="binance",
+    )
+
+    candles = service._validated_ai_candles(response, "1h", require_live=True)
+
+    assert [item.end_time for item in candles] == [closed.end_time]
+
+
+def test_ai_candle_validation_rejects_cache_for_auto_paper(tmp_path):
+    service = _service(tmp_path)
+    response = CryptoKLinesResponse(
+        symbol="BTC/USDT",
+        period="1h",
+        items=[_kline(datetime.now(timezone.utc).isoformat())],
+        count=1,
+        source="cache_binance",
+    )
+
+    with pytest.raises(RuntimeError, match="live K-line"):
+        service._validated_ai_candles(response, "1h", require_live=True)
+
+
+def test_ai_candle_validation_rejects_stale_market_data(tmp_path):
+    service = _service(tmp_path)
+    stale_end = datetime.now(timezone.utc) - timedelta(hours=3)
+    response = CryptoKLinesResponse(
+        symbol="BTC/USDT",
+        period="1h",
+        items=[_kline(stale_end.isoformat())],
+        count=1,
+        source="binance",
+    )
+
+    with pytest.raises(RuntimeError, match="stale K-line"):
+        service._validated_ai_candles(response, "1h", require_live=True)
+
+
 def test_ai_supervised_cycle_places_only_paper_order_with_protective_prices(tmp_path):
     service = _service(tmp_path)
     service.auto_trading_engine.start()
@@ -182,6 +232,22 @@ def test_ai_supervised_cycle_places_only_paper_order_with_protective_prices(tmp_
     assert order_call["take_profit_price"] == 52_000
     service.testnet_executor.place_order.assert_not_called()
     assert status.ai_supervisor["last_action"] == "BUY"
+
+
+def test_ai_supervised_sell_keeps_approved_partial_amount(tmp_path):
+    service = _service(tmp_path)
+    opened = service.paper_broker.place_order("BTC/USDT", "BUY", 0.02, 50_000)
+    assert opened.status == "filled"
+    service.auto_trading_engine.start()
+    service.analyze_ai_signal = AsyncMock(return_value=_ai_signal(action="SELL", notional=300))
+    service.paper_broker.place_order = MagicMock(wraps=service.paper_broker.place_order)
+
+    asyncio.run(service.run_auto_trading_cycle())
+
+    sell_call = service.paper_broker.place_order.call_args.kwargs
+    assert sell_call["action"] == "SELL"
+    assert sell_call["quantity"] == 0.006
+    assert service.paper_broker.get_positions()[0]["quantity"] == pytest.approx(0.014)
 
 
 def test_ai_supervised_cycle_does_not_repeat_same_candle(tmp_path):
@@ -383,7 +449,7 @@ def test_ai_supervised_provider_failures_block_after_three_cycles(tmp_path):
             return_value=CryptoKLinesResponse(
                 symbol="BTC/USDT",
                 period="1h",
-                    items=[_kline(f"2026-06-21T0{index}:59:59Z")],
+                items=[_kline((datetime.now(timezone.utc) - timedelta(minutes=3 - index)).isoformat())],
                 count=1,
             )
         )

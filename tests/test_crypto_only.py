@@ -1,5 +1,7 @@
 import asyncio
 import sqlite3
+from datetime import datetime, timezone
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,6 +26,23 @@ from core.crypto_market_data_provider import CryptoMarketDataProvider
 from core.crypto_paper_broker import CryptoPaperBrokerExecutor
 from core.crypto_strategy_engine import CryptoStrategyEngine
 from core.parameter_optimizer import CryptoStrategyParameterOptimizer
+
+
+def test_crypto_market_provider_sets_real_candle_end_time():
+    provider = CryptoMarketDataProvider({"exchange": "binance"})
+    start_ms = 1_700_000_000_000
+    exchange = MagicMock()
+    exchange.fetch_ohlcv.return_value = [[start_ms, 100, 110, 90, 105, 2]]
+    provider._get_exchange = MagicMock(return_value=exchange)
+
+    rows = provider._raw_fetch_ohlcv("BTC/USDT", timeframe="1h", limit=1)
+
+    assert rows[0]["start_time"] == datetime.fromtimestamp(start_ms / 1000, tz=timezone.utc).isoformat()
+    assert rows[0]["end_time"] == datetime.fromtimestamp(
+        (start_ms + 3_600_000 - 1) / 1000,
+        tz=timezone.utc,
+    ).isoformat()
+    assert rows[0]["end_time"] != rows[0]["start_time"]
 
 
 def test_crypto_paper_broker_buy_sell_and_rejects():

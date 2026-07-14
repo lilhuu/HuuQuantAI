@@ -57,7 +57,10 @@ async def bootstrap_user(
             username=request.username,
             password=request.password,
             display_name=request.display_name,
+            bootstrap_token=request.bootstrap_token,
         )
+    except PermissionError as exc:
+        raise ApiError(status.HTTP_403_FORBIDDEN, str(exc), ErrorCode.AUTH_FORBIDDEN) from exc
     except ValueError as exc:
         raise ApiError(status.HTTP_400_BAD_REQUEST, str(exc), ErrorCode.AUTH_ALREADY_BOOTSTRAPPED) from exc
 

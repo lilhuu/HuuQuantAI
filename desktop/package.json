@@ -9,15 +9,15 @@
     "dist": "electron-builder --win portable --x64"
   },
   "devDependencies": {
-    "electron": "^31.7.7",
-    "electron-builder": "^24.13.3"
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3"
   },
   "build": {
     "appId": "com.huu.quantai",
     "productName": "HuuQuantAI",
     "asar": true,
     "electronDist": "node_modules/electron/dist",
-    "electronVersion": "31.7.7",
+    "electronVersion": "43.1.0",
     "directories": {
       "output": "../release"
     },

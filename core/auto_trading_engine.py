@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from core.crypto_market_data_provider import normalize_crypto_symbol
 
@@ -162,6 +162,19 @@ class RiskState:
     cooldown_until: str = ""
     reason: str = ""
 
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any] | None) -> "RiskState":
+        data = dict(payload or {})
+        return cls(
+            trading_day=str(data.get("trading_day") or ""),
+            day_start_equity=float(data.get("day_start_equity") or 0),
+            daily_pnl=float(data.get("daily_pnl") or 0),
+            consecutive_losses=max(int(data.get("consecutive_losses") or 0), 0),
+            kill_switch_active=bool(data.get("kill_switch_active", False)),
+            cooldown_until=str(data.get("cooldown_until") or ""),
+            reason=str(data.get("reason") or ""),
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "trading_day": self.trading_day,
@@ -252,7 +265,7 @@ class DecisionPipeline:
         if action == "BUY":
             self._apply_buy_gates(base, steps, quantity_held, current_position_count, equity, cash, price, candidate)
         else:
-            self._apply_sell_gates(base, steps, quantity_held, price)
+            self._apply_sell_gates(base, steps, quantity_held, price, candidate)
 
         if base["status"] == "skipped" and not base["message"]:
             if place_orders:
@@ -298,13 +311,35 @@ class DecisionPipeline:
             return
         steps.append(self._step("quantity", "pass", f"quantity {base['quantity']}"))
 
-    def _apply_sell_gates(self, base: dict[str, Any], steps: list[dict[str, Any]], quantity_held: float, price: float) -> None:
+    def _apply_sell_gates(
+        self,
+        base: dict[str, Any],
+        steps: list[dict[str, Any]],
+        quantity_held: float,
+        price: float,
+        candidate: dict[str, Any],
+    ) -> None:
         if quantity_held <= 0:
             base["message"] = "no position to sell; short selling disabled"
             steps.append(self._step("short_selling", "fail", base["message"]))
             return
         steps.append(self._step("short_selling", "pass", "existing long position available"))
-        base["quantity"] = round(quantity_held, 8)
+        sell_quantity = quantity_held
+        if "approved_notional_usdt" in candidate:
+            approved_notional = max(float(candidate.get("approved_notional_usdt") or 0), 0.0)
+            sell_quantity = min(quantity_held, approved_notional / price)
+            if sell_quantity <= 0:
+                base["message"] = "approved sell notional is zero"
+                steps.append(self._step("approved_notional", "fail", base["message"]))
+                return
+            steps.append(
+                self._step(
+                    "approved_notional",
+                    "pass",
+                    f"sell notional capped at {approved_notional:.2f}",
+                )
+            )
+        base["quantity"] = round(sell_quantity, 8)
         base["notional"] = round(base["quantity"] * price, 8)
         steps.append(self._step("quantity", "pass", f"sell quantity {base['quantity']}"))
 
@@ -320,7 +355,13 @@ class DecisionPipeline:
 class AutoTradingEngine:
     """Runtime state and paper-only order decision rules."""
 
-    def __init__(self, config: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        config: dict[str, Any] | None = None,
+        *,
+        risk_state_loader: Callable[[], dict[str, Any]] | None = None,
+        risk_state_saver: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
         self.config = AutoTradingConfig.from_dict(config)
         self.state: AutoTradingState = "stopped"
         self.last_run_at = ""
@@ -330,11 +371,16 @@ class AutoTradingEngine:
         self.order_count = 0
         self.last_decisions: list[dict[str, Any]] = []
         self.logs: list[dict[str, Any]] = []
-        self.risk_state = RiskState()
+        self._risk_state_saver = risk_state_saver
+        self.risk_state = RiskState.from_dict(risk_state_loader() if risk_state_loader else None)
         self.loop_running = False
         self.next_run_at = ""
         self.last_error_type = ""
         self.ai_supervisor_status: dict[str, Any] = {}
+        if self.risk_state.kill_switch_active and self._cooldown_active():
+            self.state = "paused"
+            self.config.enabled = False
+            self.last_message = self.risk_state.reason or "risk cooldown restored"
         self._log("INFO", "initialized", "Paper auto trading engine initialized")
 
     def update_config(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -360,6 +406,7 @@ class AutoTradingEngine:
             return self.status()
         self.risk_state.kill_switch_active = False
         self.risk_state.reason = ""
+        self._persist_risk_state()
         self.state = "running"
         self.last_message = "auto trading is running in paper mode"
         self.last_error_type = ""
@@ -465,6 +512,7 @@ class AutoTradingEngine:
                     )
             elif realized_pnl > 0:
                 self.risk_state.consecutive_losses = 0
+            self._persist_risk_state()
         self._log(
             "INFO" if order.get("status") != "rejected" else "WARNING",
             "paper_order_result",
@@ -575,6 +623,8 @@ class AutoTradingEngine:
             self._activate_kill_switch(
                 f"daily loss {self.risk_state.daily_pnl:.2f} reached limit -{abs(self.config.max_daily_loss):.2f}"
             )
+        else:
+            self._persist_risk_state()
 
     def _activate_kill_switch(self, reason: str) -> None:
         cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=self.config.cooldown_minutes)
@@ -585,6 +635,7 @@ class AutoTradingEngine:
         self.config.enabled = False
         self.last_message = reason
         self._log("ERROR", "risk_kill_switch", reason, {"risk_state": self.risk_state.to_dict()})
+        self._persist_risk_state()
 
     def _cooldown_active(self) -> bool:
         if not self.risk_state.cooldown_until:
@@ -601,7 +652,12 @@ class AutoTradingEngine:
             self.risk_state.cooldown_until = ""
             self.risk_state.reason = ""
             self._log("INFO", "risk_cooldown_expired", "risk cooldown expired")
+            self._persist_risk_state()
         return active
+
+    def _persist_risk_state(self) -> None:
+        if self._risk_state_saver is not None:
+            self._risk_state_saver(self.risk_state.to_dict())
 
     def _decision_step(self, name: str, status: str, reason: str) -> dict[str, Any]:
         return {

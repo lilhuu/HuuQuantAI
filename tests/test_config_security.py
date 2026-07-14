@@ -1,6 +1,25 @@
+import json
 import pytest
+from pathlib import Path
 
 from config.config_loader import _validate_raw_config_security, load_config
+
+
+def test_docker_compose_binds_localhost_and_requires_bootstrap_token():
+    compose = Path("docker-compose.yml").read_text(encoding="utf-8")
+
+    assert '"127.0.0.1:8000:8000"' in compose
+    assert "HUU_BOOTSTRAP_TOKEN: ${HUU_BOOTSTRAP_TOKEN:?" in compose
+
+
+def test_desktop_uses_supported_electron_runtime():
+    package = json.loads(Path("desktop/package.json").read_text(encoding="utf-8"))
+    electron_version = package["devDependencies"]["electron"].lstrip("^~")
+    builder_version = package["devDependencies"]["electron-builder"].lstrip("^~")
+
+    assert tuple(map(int, electron_version.split("."))) >= (43, 1, 0)
+    assert tuple(map(int, builder_version.split("."))) >= (26, 15, 3)
+    assert package["build"]["electronVersion"] == electron_version
 
 
 def test_config_rejects_plaintext_api_secret():

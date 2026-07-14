@@ -151,6 +151,7 @@ def get_auth_service() -> AuthService:
     return AuthService(
         storage_path=auth_settings.get("storage_path", "data/app_state.db"),
         session_hours=auth_settings.get("session_hours", 168),
+        bootstrap_token=os.getenv("HUU_BOOTSTRAP_TOKEN", ""),
     )
 
 

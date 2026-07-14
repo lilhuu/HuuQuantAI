@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -99,14 +100,15 @@ class CryptoPaperBrokerExecutor:
         self.quantity_precision = int(self.config.get("quantity_precision", 8) or 8)
         self.price_precision = int(self.config.get("price_precision", 8) or 8)
         self.storage_path = str(self.config.get("storage_path") or self.config.get("db_path") or "").strip()
-        self.persistence_enabled = bool(self.config.get("persistence_enabled", True)) and bool(self.storage_path)
+        self.persistence_required = bool(self.config.get("persistence_enabled", True)) and bool(self.storage_path)
+        self.persistence_enabled = self.persistence_required
         self._persistence_ready = False
         self.orders: Dict[str, CryptoPaperOrder] = {}
         self.positions: Dict[str, Dict[str, float]] = {}
         self.trade_history: List[Dict[str, Any]] = []
         self.equity_curve: List[Dict[str, Any]] = []
         self.paper_logs: List[Dict[str, Any]] = []
-        self.is_connected = True
+        self.is_connected = not self.persistence_required
         self.tp_manager: TakeProfitManager | None = None
         if bool(self.config.get("tpsl_monitor_enabled", False)) and self.config.get("market_provider") is not None:
             self.tp_manager = TakeProfitManager(
@@ -144,15 +146,22 @@ class CryptoPaperBrokerExecutor:
             order_type=str(order_type or "LIMIT").upper(),
             order_id=self._generate_order_id("CPAPER"),
         )
+        if self.persistence_required and not self._persistence_ready:
+            order.status = "rejected"
+            order.message = "Crypto paper persistence is unavailable; trading is blocked"
+            self._record_log("persistence_unavailable", order.message, order, level="ERROR")
+            return order
+
+        snapshot = self._state_snapshot()
         self.orders[order.order_id] = order
 
         error = self._validate_order(order)
         if error:
-            return self._reject_order(order, error)
+            return self._reject_order(order, error, snapshot=snapshot)
 
         fill_quantity = self._planned_fill_quantity(order)
         if fill_quantity <= 0:
-            return self._reject_order(order, "CryptoPaperBroker matching failed")
+            return self._reject_order(order, "CryptoPaperBroker matching failed", snapshot=snapshot)
 
         self._apply_fill(order, fill_quantity, stop_loss_price=stop_loss_price, take_profit_price=take_profit_price)
         remaining = self._round_quantity(order.quantity - order.filled_quantity)
@@ -165,7 +174,10 @@ class CryptoPaperBrokerExecutor:
             order.message = f"CryptoPaperBroker filled {order.filled_quantity}"
             self._record_log("order_filled", order.message, order)
         self._record_equity_point(order=order, reason=order.status)
-        self._persist_state()
+        try:
+            self._persist_state()
+        except Exception as exc:
+            return self._rollback_persistence_failure(order, snapshot, exc)
         return order
 
     def cancel_order(self, order_id: str) -> bool:
@@ -433,12 +445,58 @@ class CryptoPaperBrokerExecutor:
             exits.append(order.to_response())
         return exits
 
-    def _reject_order(self, order: CryptoPaperOrder, message: str) -> CryptoPaperOrder:
+    def _reject_order(
+        self,
+        order: CryptoPaperOrder,
+        message: str,
+        *,
+        snapshot: dict[str, Any] | None = None,
+    ) -> CryptoPaperOrder:
         order.status = "rejected"
         order.message = str(message or "order rejected")
         self._record_log("order_rejected", order.message, order, level="WARN")
         self._record_equity_point(order=order, reason="order_rejected")
-        self._persist_state()
+        try:
+            self._persist_state()
+        except Exception as exc:
+            return self._rollback_persistence_failure(order, snapshot or self._state_snapshot(), exc)
+        return order
+
+    def _state_snapshot(self) -> dict[str, Any]:
+        return {
+            "cash": self.cash,
+            "orders": deepcopy(self.orders),
+            "positions": deepcopy(self.positions),
+            "trade_history": deepcopy(self.trade_history),
+            "equity_curve": deepcopy(self.equity_curve),
+            "paper_logs": deepcopy(self.paper_logs),
+        }
+
+    def _restore_state_snapshot(self, snapshot: dict[str, Any]) -> None:
+        self.cash = float(snapshot["cash"])
+        self.orders = snapshot["orders"]
+        self.positions = snapshot["positions"]
+        self.trade_history = snapshot["trade_history"]
+        self.equity_curve = snapshot["equity_curve"]
+        self.paper_logs = snapshot["paper_logs"]
+
+    def _rollback_persistence_failure(
+        self,
+        order: CryptoPaperOrder,
+        snapshot: dict[str, Any],
+        exc: Exception,
+    ) -> CryptoPaperOrder:
+        self._restore_state_snapshot(snapshot)
+        self._persistence_ready = False
+        self.is_connected = False
+        order.status = "rejected"
+        order.message = f"Crypto paper persistence failed; order rolled back: {exc}"
+        order.filled_quantity = 0.0
+        order.filled_price = 0.0
+        order.fee = 0.0
+        order.realized_pnl = 0.0
+        order.filled_time = None
+        self._record_log("persistence_failed", order.message, order, level="ERROR")
         return order
 
     def _fill_notional(self, action: str, quantity: float, price: float) -> float:
@@ -611,13 +669,20 @@ class CryptoPaperBrokerExecutor:
                     );
                     CREATE INDEX IF NOT EXISTS idx_crypto_paper_logs_event_time
                         ON crypto_paper_logs(event, timestamp);
+                    CREATE TABLE IF NOT EXISTS crypto_auto_risk_state (
+                        id INTEGER PRIMARY KEY CHECK (id = 1),
+                        payload TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
                     """
                 )
                 self._ensure_position_columns(conn)
             self._persistence_ready = True
+            self.is_connected = True
         except Exception as exc:
             self.persistence_enabled = False
             self._persistence_ready = False
+            self.is_connected = False
             self.paper_logs.append(
                 {
                     "timestamp": datetime.now().isoformat(),
@@ -650,6 +715,33 @@ class CryptoPaperBrokerExecutor:
         configure_sqlite_connection(conn)
         conn.row_factory = sqlite3.Row
         return conn
+
+    def load_auto_risk_state(self) -> dict[str, Any]:
+        if not self.persistence_enabled or not self._persistence_ready:
+            return {}
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload FROM crypto_auto_risk_state WHERE id = 1"
+            ).fetchone()
+        if not row:
+            return {}
+        payload = json.loads(str(row["payload"] or "{}"))
+        return payload if isinstance(payload, dict) else {}
+
+    def save_auto_risk_state(self, payload: dict[str, Any]) -> None:
+        if not self.persistence_enabled or not self._persistence_ready:
+            raise RuntimeError("Crypto paper persistence is unavailable")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO crypto_auto_risk_state(id, payload, updated_at)
+                VALUES(1, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    payload = excluded.payload,
+                    updated_at = excluded.updated_at
+                """,
+                (json.dumps(payload, ensure_ascii=False, sort_keys=True), datetime.now().isoformat()),
+            )
 
     def _existing_equity_keys(self, conn: sqlite3.Connection) -> set[tuple[str, str, str]]:
         rows = conn.execute("SELECT timestamp, COALESCE(order_id, '') AS order_id, COALESCE(reason, '') AS reason FROM crypto_paper_equity_curve").fetchall()

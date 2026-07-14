@@ -25,7 +25,7 @@ test("local login enters the protected workbench", async ({ page }) => {
   await page.getByRole("button", { name: "登录工作台" }).click();
 
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole("heading", { name: "仪表盘" })).toBeVisible();
+  await expect(page.locator('[data-feature-role="ai-decision-canvas"]')).toBeVisible();
   expect(api.loginPayload).toEqual({ username: "owner", password: "password123" });
   await waitForMockApiIdle(page, api);
   expect(api.unexpectedRequests).toEqual([]);

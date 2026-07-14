@@ -13,6 +13,7 @@ class BootstrapUserRequest(BaseModel):
     username: str = Field(default="owner", min_length=3, max_length=32)
     password: str = Field(..., min_length=8, max_length=128)
     display_name: Optional[str] = Field(default=None, max_length=64)
+    bootstrap_token: str = Field(default="", max_length=256)
 
 
 class LoginRequest(BaseModel):

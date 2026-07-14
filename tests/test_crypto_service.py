@@ -1,4 +1,6 @@
 import asyncio
+import threading
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -133,6 +135,66 @@ def test_init_symbols_components_and_auto_config(tmp_path):
     assert service.auto_trading_engine.config.max_order_notional == 500
     assert service._macro_cache is None
     assert service._macro_cache_time == 0.0
+
+
+def test_market_provider_call_runs_outside_event_loop_thread(tmp_path):
+    service = _service(tmp_path)
+    loop_thread_id = threading.get_ident()
+    provider_thread_ids = []
+
+    def fetch_quotes(_symbols):
+        provider_thread_ids.append(threading.get_ident())
+        return [_quote()]
+
+    service.provider.fetch_quotes = fetch_quotes
+
+    response = asyncio.run(service.get_quotes(["BTC/USDT"]))
+
+    assert response.count == 1
+    assert provider_thread_ids and provider_thread_ids[0] != loop_thread_id
+
+
+def test_ai_provider_call_runs_outside_event_loop_thread(tmp_path):
+    service = _service(
+        tmp_path,
+        {"ai": {"enabled": True}, "storage": {"db_path": str(tmp_path / "ai_thread.db")}},
+    )
+    loop_thread_id = threading.get_ident()
+    provider_thread_ids = []
+    service.get_quotes = AsyncMock(
+        return_value=CryptoQuotesResponse(
+            items=[CryptoQuoteResponse(**_quote())],
+            count=1,
+            source="unit",
+        )
+    )
+    service.get_klines = AsyncMock(
+        return_value=CryptoKLinesResponse(
+            symbol="BTC/USDT",
+            period="1h",
+            items=[CryptoKLineResponse(**_kline())],
+            count=1,
+            source="unit",
+        )
+    )
+    service.get_macro_overview = AsyncMock(
+        return_value=MacroOverviewResponse(data={}, gate={"state": "ALLOW_FULL"})
+    )
+    service.ai_store.save_signal = MagicMock(return_value=_ai_record())
+
+    def analyze(_context, **_kwargs):
+        provider_thread_ids.append(threading.get_ident())
+        return _advice()
+
+    service.ai_advisor.analyze = analyze
+
+    asyncio.run(
+        service.analyze_ai_signal(
+            AiSignalAnalyzeRequest(symbol="BTC/USDT", period="1h", limit=30)
+        )
+    )
+
+    assert provider_thread_ids and provider_thread_ids[0] != loop_thread_id
 
 
 def test_get_quotes_specific_all_search_pagination_and_cache(tmp_path):
@@ -552,7 +614,18 @@ def test_ai_assess_real_trading_flags_cash_caps_and_position_caps(tmp_path):
 def test_ai_signal_analyze_list_get_and_provider_failures(tmp_path):
     service = _service(tmp_path, {"ai": {"enabled": True, "min_confidence_for_order": 0.65, "max_order_notional": 300}, "storage": {"db_path": str(tmp_path / "ai.db")}})
     service.get_quotes = AsyncMock(return_value=CryptoQuotesResponse(items=[CryptoQuoteResponse(**_quote())], count=1, source="unit"))
-    service.get_klines = AsyncMock(return_value=CryptoKLinesResponse(symbol="BTC/USDT", period="1h", items=[CryptoKLineResponse(**_kline())], count=1))
+    fresh_kline = {
+        **_kline(),
+        "end_time": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+    }
+    service.get_klines = AsyncMock(
+        return_value=CryptoKLinesResponse(
+            symbol="BTC/USDT",
+            period="1h",
+            items=[CryptoKLineResponse(**fresh_kline)],
+            count=1,
+        )
+    )
     service.get_macro_overview = AsyncMock(return_value=MacroOverviewResponse(data={}, gate={"state": "ALLOW_FULL"}))
     service.paper_broker.get_account_info = MagicMock(return_value={"cash": 1000, "available_cash": 1000})
     service.paper_broker.get_positions = MagicMock(return_value=[])

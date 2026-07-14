@@ -41,6 +41,18 @@ def ensure_node_dependencies() -> None:
         run([npm, "install"], cwd=DESKTOP_DIR)
 
 
+def ensure_electron_runtime() -> None:
+    executable_name = "electron.exe" if platform.system().lower().startswith("win") else "electron"
+    electron_dir = DESKTOP_DIR / "node_modules" / "electron"
+    if (electron_dir / "dist" / executable_name).exists():
+        return
+
+    installer = electron_dir / "install.js"
+    if not installer.exists():
+        raise RuntimeError("Electron 安装器缺失，请在 desktop 目录重新运行 npm install。")
+    run(["node", str(installer)], cwd=DESKTOP_DIR)
+
+
 def build_frontend() -> None:
     run([npm_command(), "run", "build"], cwd=FRONTEND_DIR)
 
@@ -84,6 +96,7 @@ def main() -> None:
     )
 
     ensure_node_dependencies()
+    ensure_electron_runtime()
     build_frontend()
     build_backend()
     build_electron()

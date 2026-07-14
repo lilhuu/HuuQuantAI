@@ -1,4 +1,5 @@
 import sqlite3
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -158,6 +159,59 @@ def test_persistence_restore_and_wal(tmp_path):
 
     with sqlite3.connect(storage_path) as conn:
         assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+
+
+def test_persistence_initialization_failure_blocks_trading(monkeypatch, tmp_path):
+    def fail_connect(_self):
+        raise OSError("disk unavailable")
+
+    monkeypatch.setattr(CryptoPaperBrokerExecutor, "_connect", fail_connect)
+    broker = CryptoPaperBrokerExecutor(
+        {
+            "storage_path": str(tmp_path / "unavailable.db"),
+            "max_order_notional": 5000,
+            "max_position_ratio": 1.0,
+        }
+    )
+
+    order = broker.place_order("BTC/USDT", "BUY", 0.01, 1000)
+
+    assert broker.is_connected is False
+    assert order.status == "rejected"
+    assert "persistence" in order.message.lower()
+    assert broker.cash == 10_000
+    assert broker.positions == {}
+    assert broker.trade_history == []
+
+
+def test_order_persistence_failure_rolls_back_memory_state(monkeypatch, tmp_path):
+    broker = CryptoPaperBrokerExecutor(
+        {
+            "storage_path": str(tmp_path / "runtime_failure.db"),
+            "max_order_notional": 5000,
+            "max_position_ratio": 1.0,
+            "partial_fill_enabled": False,
+        }
+    )
+    before_cash = broker.cash
+    before_order_ids = set(broker.orders)
+    before_equity_count = len(broker.equity_curve)
+    monkeypatch.setattr(
+        broker,
+        "_persist_state",
+        MagicMock(side_effect=OSError("disk full")),
+    )
+
+    order = broker.place_order("BTC/USDT", "BUY", 0.01, 1000)
+
+    assert order.status == "rejected"
+    assert "persistence" in order.message.lower()
+    assert broker.is_connected is False
+    assert broker.cash == before_cash
+    assert broker.positions == {}
+    assert broker.trade_history == []
+    assert set(broker.orders) == before_order_ids
+    assert len(broker.equity_curve) == before_equity_count
 
 
 def test_order_query_pagination_status_and_response_shape():

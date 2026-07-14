@@ -15,6 +15,7 @@ const bootstrapForm = reactive({
   username: "owner",
   display_name: "我的加密货币工作台",
   password: "",
+  bootstrap_token: "",
 });
 
 const loginForm = reactive({
@@ -126,6 +127,16 @@ async function submit() {
             type="password"
             autocomplete="new-password"
             placeholder="至少 8 位"
+          />
+        </label>
+
+        <label v-if="isSetupMode" class="field auth-field">
+          <span>Docker 初始化令牌（桌面版可留空）</span>
+          <input
+            v-model="bootstrapForm.bootstrap_token"
+            type="password"
+            autocomplete="one-time-code"
+            placeholder="HUU_BOOTSTRAP_TOKEN"
           />
         </label>
 
