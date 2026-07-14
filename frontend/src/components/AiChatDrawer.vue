@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, ref, watch } from "vue";
+import { storeToRefs } from "pinia";
 import { useRouter } from "vue-router";
 
 import { useCopilotContext } from "../composables/useCopilotContext";
@@ -17,6 +18,7 @@ const props = defineProps({
 
 const router = useRouter();
 const aiChat = useAiChatStore();
+const { selectedModel } = storeToRefs(aiChat);
 const trading = useTradingStore();
 const draft = ref("");
 const symbol = ref(normalizeCryptoSymbol(trading.selectedCryptoSymbol || "BTC/USDT"));
@@ -25,7 +27,6 @@ const limit = ref(120);
 const includeContext = ref(true);
 const guideMode = ref(false);
 const selectedGuideGoal = ref("");
-const selectedModel = ref("deepseek-v4-flash");
 const messageList = ref(null);
 const contextNotice = ref("");
 const CHAT_DRAFT_LIMIT = 500;

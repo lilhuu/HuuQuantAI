@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { flushPromises, shallowMount } from "@vue/test-utils";
+import { flushPromises, mount, shallowMount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 
 import { apiClient } from "../lib/api";
@@ -225,6 +225,46 @@ describe("view smoke tests", () => {
     expect(wrapper.find("[data-copilot-panel]").exists()).toBe(true);
     expect(wrapper.find("[data-copilot-panel]").classes()).toContain("cq-pet-chat-panel");
     expect(wrapper.find(".ai-chat-drawer-stub").attributes("data-surface")).toBe("pet-panel");
+    wrapper.unmount();
+  });
+
+  it("renders the dashboard as the selected AI decision canvas", async () => {
+    const component = (await viewModules.DashboardView()).default;
+    const wrapper = mount(component, {
+      global: {
+        plugins: [createPinia()],
+        stubs: { CryptoKlineChart: true },
+      },
+    });
+
+    expect(wrapper.find('[data-feature-role="ai-decision-canvas"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("AI 最终裁决");
+    expect(wrapper.text()).toContain("本地风险审批");
+    wrapper.unmount();
+  });
+
+  it("switches the shared copilot model from the workbench command bar", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const aiChat = useAiChatStore();
+    const wrapper = shallowMount(WorkbenchLayout, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          RouterView: true,
+          RouterLink: {
+            props: ["to", "custom"],
+            template: '<a :href="typeof to === `string` ? to : `/`"><slot :href="typeof to === `string` ? to : `/`" /></a>',
+          },
+          AiChatDrawer: true,
+          CopilotPet: true,
+        },
+      },
+    });
+
+    expect(aiChat.selectedModel).toBe("deepseek-v4-flash");
+    await wrapper.get('[data-workbench-model="deepseek-v4-pro"]').trigger("click");
+    expect(aiChat.selectedModel).toBe("deepseek-v4-pro");
     wrapper.unmount();
   });
 

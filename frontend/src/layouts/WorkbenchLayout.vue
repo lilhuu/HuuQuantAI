@@ -1,6 +1,25 @@
 <script setup>
 import { computed, onBeforeUnmount, onErrorCaptured, onMounted, ref, watch } from "vue";
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
+import {
+  PhArrowsClockwise,
+  PhChartLine,
+  PhChartLineUp,
+  PhClockCounterClockwise,
+  PhCube,
+  PhFlask,
+  PhGearSix,
+  PhListChecks,
+  PhRobot,
+  PhShieldCheck,
+  PhSidebarSimple,
+  PhSignOut,
+  PhSquaresFour,
+  PhTarget,
+  PhTestTube,
+  PhUserCircle,
+  PhWallet,
+} from "@phosphor-icons/vue";
 
 import AiChatDrawer from "../components/AiChatDrawer.vue";
 import CopilotPet from "../components/CopilotPet.vue";
@@ -33,20 +52,22 @@ const {
 } = useWorkspaceActions();
 
 const navItems = [
-  { label: "仪表盘", icon: "grid", to: "/" },
-  { label: "市场行情", icon: "trend", to: "/market" },
-  { label: "手动交易", icon: "clock", to: "/trade" },
-  { label: "自动交易", icon: "target", to: "/auto" },
-  { label: "AI 助手", icon: "target", to: "/ai" },
-  { label: "策略中心", icon: "flask", to: "/strategy" },
-  { label: "回测中心", icon: "audit", to: "/backtest" },
-  { label: "投资组合", icon: "wallet", to: "/portfolio" },
-  { label: "账户状态", icon: "wallet", to: "/account" },
-  { label: "风控中心", icon: "shield", to: "/risk" },
-  { label: "审计日志", icon: "audit", to: "/audit" },
-  { label: "诊断中心", icon: "target", to: "/diagnostics" },
-  { label: "系统设置", icon: "settings", to: "/settings" },
+  { label: "决策中枢", icon: PhSquaresFour, to: "/" },
+  { label: "市场行情", icon: PhChartLineUp, to: "/market" },
+  { label: "手动交易", icon: PhClockCounterClockwise, to: "/trade" },
+  { label: "自动交易", icon: PhTarget, to: "/auto" },
+  { label: "AI 助手", icon: PhRobot, to: "/ai" },
+  { label: "策略中心", icon: PhFlask, to: "/strategy" },
+  { label: "回测中心", icon: PhTestTube, to: "/backtest" },
+  { label: "投资组合", icon: PhCube, to: "/portfolio" },
+  { label: "账户状态", icon: PhWallet, to: "/account" },
+  { label: "风控中心", icon: PhShieldCheck, to: "/risk" },
+  { label: "审计日志", icon: PhListChecks, to: "/audit" },
+  { label: "诊断中心", icon: PhChartLine, to: "/diagnostics" },
+  { label: "系统设置", icon: PhGearSix, to: "/settings" },
 ];
+
+const periodOptions = ["15m", "1h", "4h", "1d"];
 
 const visibleErrorInfo = computed(() => toastErrorInfo.value || workspaceErrorInfo.value);
 const selectedQuote = computed(
@@ -141,6 +162,16 @@ function toggleCopilot() {
   aiChat.openDrawer();
 }
 
+async function changePeriod(period) {
+  if (!period || period === marketStore.selectedCryptoPeriod) return;
+  marketStore.selectedCryptoPeriod = period;
+  await marketStore.fetchCryptoKlines({
+    symbol: selectedCryptoSymbol.value,
+    period,
+    limit: 200,
+  });
+}
+
 function formatTopPrice(value) {
   const number = Number(value || 0);
   if (!Number.isFinite(number) || number <= 0) return "--";
@@ -177,7 +208,7 @@ function formatTopVolume(value) {
             :class="{ active: isActiveNavItem(item) }"
             @click.prevent="navigateSidebar(item)"
           >
-            <span class="cq-icon" :data-icon="item.icon" aria-hidden="true"></span>
+            <component :is="item.icon" class="cq-nav__icon" :size="18" weight="regular" aria-hidden="true" />
             <span>{{ item.label }}</span>
           </a>
         </RouterLink>
@@ -196,18 +227,19 @@ function formatTopVolume(value) {
           <span>交易引擎</span>
           <strong>模拟模式</strong>
         </div>
-        <small>v1.3.0</small>
+        <small>v1.6.0 · Paper only</small>
       </div>
     </aside>
 
     <section class="cq-main">
       <header class="cq-topbar">
         <div class="cq-market-strip">
-          <button class="cq-menu-button" type="button" title="主菜单" aria-label="主菜单">☰</button>
+          <button class="cq-menu-button" type="button" title="主菜单" aria-label="主菜单">
+            <PhSidebarSimple :size="18" />
+          </button>
           <select v-model="selectedCryptoSymbol" class="cq-pair-select" aria-label="选择交易对" @change="changeSymbol">
             <option v-for="symbol in pairOptions" :key="symbol" :value="symbol">{{ symbol }}</option>
           </select>
-          <span class="cq-favorite-star" aria-hidden="true">★</span>
           <div class="cq-top-stat">
             <span>最新价</span>
             <strong>{{ priceText }}</strong>
@@ -228,9 +260,16 @@ function formatTopVolume(value) {
             <span>24h 成交量</span>
             <strong>{{ volumeText }}</strong>
           </div>
-          <div class="cq-period-pill">
-            <strong>{{ periodText }}</strong>
-            <span>周期</span>
+          <div class="cq-period-switch" aria-label="K 线周期">
+            <button
+              v-for="period in periodOptions"
+              :key="period"
+              type="button"
+              :class="{ active: periodText === period }"
+              @click="changePeriod(period)"
+            >
+              {{ period }}
+            </button>
           </div>
         </div>
 
@@ -238,20 +277,35 @@ function formatTopVolume(value) {
           <div class="cq-model-toggle" aria-label="AI 模型">
             <span>AI 模型</span>
             <div>
-              <button class="active" type="button">Flash</button>
-              <button type="button">Pro</button>
+              <button
+                type="button"
+                data-workbench-model="deepseek-v4-flash"
+                :class="{ active: aiChat.selectedModel === 'deepseek-v4-flash' }"
+                @click="aiChat.setSelectedModel('deepseek-v4-flash')"
+              >Flash</button>
+              <button
+                type="button"
+                data-workbench-model="deepseek-v4-pro"
+                :class="{ active: aiChat.selectedModel === 'deepseek-v4-pro' }"
+                @click="aiChat.setSelectedModel('deepseek-v4-pro')"
+              >Pro</button>
             </div>
           </div>
           <div class="cq-mode-card">
             <span>账户模式</span>
-            <strong>Binance 模拟</strong>
+            <strong><PhRobot :size="14" /> Binance 模拟</strong>
           </div>
           <div class="cq-mode-card">
             <span>真实交易</span>
-            <strong class="number-down">已关闭</strong>
+            <strong class="number-down"><PhShieldCheck :size="14" /> 已关闭</strong>
           </div>
-          <button class="cq-icon-button" title="刷新工作台" aria-label="刷新工作台" @click="refreshWorkspace">↻</button>
-          <button class="cq-outline-button cq-logout-button" @click="logout">退出</button>
+          <button class="cq-icon-button" title="刷新工作台" aria-label="刷新工作台" @click="refreshWorkspace">
+            <PhArrowsClockwise :size="17" />
+          </button>
+          <button class="cq-icon-button cq-user-button" title="打开 AI 副驾驶" aria-label="打开 AI 副驾驶" @click="toggleCopilot">
+            <PhUserCircle :size="18" />
+          </button>
+          <button class="cq-outline-button cq-logout-button" @click="logout"><PhSignOut :size="15" />退出</button>
         </div>
       </header>
 

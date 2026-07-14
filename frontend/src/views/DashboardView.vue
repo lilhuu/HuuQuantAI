@@ -1,7 +1,7 @@
 <script setup>
-import FeatureCommandView from "../components/FeatureCommandView.vue";
+import DecisionCommandCenter from "../components/DecisionCommandCenter.vue";
 </script>
 
 <template>
-  <FeatureCommandView feature="dashboard" />
+  <DecisionCommandCenter />
 </template>

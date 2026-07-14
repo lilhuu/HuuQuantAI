@@ -1,93 +1,54 @@
-**Findings**
-- No P0/P1/P2 findings remain.
+# HuuQuantAI AI Decision Center Design QA
 
-**Comparison Result**
-- The selected AI workbench direction is now applied as a shared visual language, not as identical copied pages.
-- Each main feature keeps its own operational content:
-  - Dashboard: AI overview, risk steps, watch quotes, advice summary, recent orders.
-  - Market: crypto K-line, period and limit controls, watch list, order book and quote table.
-  - Manual trade: paper order form, latest price helper, order table and account summary.
-  - Auto trade: scan configuration, strategy stack and recent decision pipeline.
-  - Strategy center: strategy templates, run/backtest controls and result ledger.
-  - Portfolio: equity/drawdown chart, performance metrics and attribution groups.
-  - Account: simulated account curve, positions and PaperBroker logs.
-  - Risk: local risk gate rules and blocked decision records.
-  - Audit: order lifecycle ledger and simulated execution events.
-  - Diagnostics: health radar, enabled strategy status and anomaly clues.
-  - Settings: DeepSeek V4 Flash/Pro selector, safety boundary and workspace preferences.
-- The right-side AI copilot remains consistent across feature pages, but its prompt and context are feature-specific.
-- True trading remains visibly closed; all execution language is simulation/PaperBroker oriented.
+## Comparison Target
 
-**Implementation Notes**
-- Reworked `frontend/src/components/FeatureCommandView.vue` so it renders distinct page layouts per feature instead of one repeated matrix.
-- Added feature-specific forms, tables, charts and action buttons while preserving the existing stores and API clients.
-- Updated `frontend/src/styles/views.css` with responsive distinct-page grids, tables, forms, order book, health radar and model-switch styling.
-- Kept the original app shell/sidebar/topbar and the existing AI assistant page intact.
+- Source visual truth: `C:\Users\Administrator\.codex\generated_images\019dd837-2fd1-70a1-a745-4b992298b37c\exec-45407340-368b-4f2c-9eae-9a0bc40221cf.png`
+- Implementation URL: `http://127.0.0.1:4173/`
+- Implementation screenshot: `D:\auto_trader\.qa\decision-canvas-final-v2.png`
+- Full-view comparison: `D:\auto_trader\.qa\decision-comparison-final.png`
+- Focused comparison: `D:\auto_trader\.qa\decision-focused-comparison-final.png`
+- Desktop viewport: `1440 x 1024`
+- Responsive viewport: `740 x 900`
+- State: authenticated local paper-trading workbench, `BTC/USDT`, `1h`, DeepSeek Flash, real trading disabled
 
-**Evidence**
-- Dashboard screenshot: `D:\auto_trader\design-qa-dashboard-distinct.png`.
-- Market screenshot: `D:\auto_trader\design-qa-market-distinct.png`.
-- Manual trade screenshot: `D:\auto_trader\design-qa-trade-distinct.png`.
-- Strategy screenshot: `D:\auto_trader\design-qa-strategy-distinct.png`.
-- Portfolio screenshot: `D:\auto_trader\design-qa-portfolio-distinct.png`.
-- Risk screenshot: `D:\auto_trader\design-qa-risk-distinct.png`.
-- Settings screenshot: `D:\auto_trader\design-qa-settings-distinct.png`.
-- Captured route/state: authenticated local QA session, desktop viewport, Edge headless render.
+## Evidence
 
-**Follow-Up Polish**
-- P3: Replace remaining glyph-like navigation icons with a proper icon system in a later pass.
-- P3: Add deeper micro-interactions for order book hover, risk step drill-down and portfolio attribution filters.
-- P3: Add more route screenshots after live production data is available.
+- Full-view comparison confirms the same high-level information architecture: compact left navigation, market command bar, chart and AI verdict split, right evidence rail, five-stage decision pipeline, decision history, and floating copilot pet.
+- Focused comparison confirms the chart/verdict proportions, dark terminal palette, violet AI emphasis, semantic green/red market states, compact dividers, and consistent Phosphor icon family.
+- Typography preserves the reference hierarchy while using the existing product font stack. Small terminal labels remain readable at the target viewport and do not overlap.
+- The implementation uses the existing HuuQuantAI robot raster asset and library icons; no placeholder image, emoji, custom SVG, or CSS-drawn visible asset replaces the reference visuals.
+- Copy is adapted to live product state instead of fabricated demo history. Real trading remains explicitly shown as disabled and all order language remains paper-only.
+- Focused region comparison was required because top-bar controls, verdict hierarchy, chart labels, and pipeline typography were too small to judge reliably in the full-width side-by-side image.
 
-## Floating Pet Copilot QA
+## Comparison History
 
-**Evidence**
-- Source visual: `C:\Users\ADMINI~1\AppData\Local\Temp\codex-clipboard-78e879ab-68b8-4be2-ac65-99d2085ebfa6.png`.
-- Desktop closed, 1280 x 720: `docs/design-qa/floating-pet/desktop-closed.png`.
-- Desktop open, 1280 x 720: `docs/design-qa/floating-pet/desktop-open.png`.
-- Mobile closed, 390 x 844: `docs/design-qa/floating-pet/mobile-closed.png`.
-- Mobile open, 390 x 844: `docs/design-qa/floating-pet/mobile-open.png`.
+### Iteration 1
 
-**State Coverage**
-- Floating pet idle state and unread attention state.
-- Overlay chat panel on desktop without changing the workbench grid.
-- Full-screen chat panel below 760px.
-- Streaming response, background completion while closed, stop generation, and model selection.
-- Reduced-motion fallback to static PNG.
+- Finding [P2]: the primary work area ended around three quarters of the desktop viewport, leaving excessive empty space below the history panel.
+- Fix: added viewport-relative minimum height and a flexible history row so the decision history and evidence rail fill the available workspace without inflating typography.
+- Post-fix evidence: `D:\auto_trader\.qa\decision-canvas-after.png`.
 
-**Findings And Patches**
-- Fixed a class collision that made the desktop panel participate in normal page flow.
-- Fixed a late shell grid rule that caused mobile horizontal overflow.
-- Hid the floating pet while its chat panel is open to avoid covering panel controls.
-- Verified desktop panel bounds are 460px wide with no horizontal overflow.
-- Verified mobile panel fills 390 x 844 and keeps the composer visible.
-- Verified generated robot assets have transparent backgrounds and remain legible at 88px.
-- No unresolved P0, P1, or P2 visual issues.
+### Iteration 2
 
-final result: passed
+- Finding [P2]: the AI verdict was visually merged into the market panel and did not have the reference design's violet focal boundary.
+- Fix: added an inset violet border, subtle internal AI tint, independent spacing, and violet brand emphasis.
+- Post-fix evidence: `D:\auto_trader\.qa\decision-canvas-final-v2.png` and `D:\auto_trader\.qa\decision-focused-comparison-final.png`.
 
-## AI Supervised Paper Trading QA
+## Findings
 
-**Scope**
-- Removed the repeated feature-page copilot card and the top-bar AI shortcut.
-- Kept the floating robot as the only chat-panel entry inside authenticated workbench pages.
-- Added the AI supervised PaperBroker controls and status panel to the automatic-trading page.
+- No actionable P0, P1, or P2 findings remain.
+- [P3] Live decision history may contain fewer rows than the reference mockup. This is intentional: the implementation displays persisted project data and does not fabricate trading activity for visual density.
 
-**Browser Evidence**
-- Verified `/auto` in an authenticated local QA session against `http://127.0.0.1:5174`.
-- Confirmed the page exposes `规则自动 / AI 模拟托管`, the manual PaperBroker acknowledgement, Pro/Flash supervisor status, provider failure count, and 2% stop-loss / 4% take-profit protection.
-- Confirmed the feature page contains no embedded copilot panel or duplicate `问 AI` / `打开 AI 助手` command.
-- Confirmed the floating robot opens the project-copilot panel and the `发送` button remains visible at the bottom of the 390 x 844 mobile viewport.
-- Measured no horizontal document overflow in the authenticated workbench or the open mobile chat panel.
-- The in-app browser screenshot capture timed out; DOM snapshots, accessible controls, viewport bounds, and overflow measurements were used for this round's visual verification.
+## Interaction And Responsive Checks
 
-**Safety Evidence**
-- The UI states that AI supervision only operates the PaperBroker simulated account.
-- Start remains disabled until the user acknowledges the simulation-only boundary.
-- Restart behavior is displayed as requiring a new manual start.
-- No Testnet or real-trading control is exposed by the AI supervisor UI.
+- Flash and Pro controls update the shared copilot model state and selected styling.
+- The floating robot opens and closes the AI project copilot; the input, model selector, delete control, and send control remain reachable.
+- Strategy-center navigation renders the shared terminal shell without console errors or horizontal overflow.
+- At `740 x 900`, the shell becomes horizontally scrollable navigation, the dashboard stacks into one column, the document width equals the viewport width, and the pet does not obscure persistent controls.
+- Browser console error/warning check: none observed.
 
-**Findings**
-- No unresolved P0, P1, or P2 visual or interaction issues.
+## Follow-up Polish
+
+- A future density pass can add explicit empty-state rows or pagination affordances when the persisted decision history is short, without inventing trade results.
 
 final result: passed

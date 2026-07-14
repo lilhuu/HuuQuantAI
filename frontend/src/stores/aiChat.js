@@ -59,6 +59,7 @@ async function consumeEventStream(stream, onEvent) {
 
 export const useAiChatStore = defineStore("ai-chat", () => {
   const drawerOpen = ref(false);
+  const selectedModel = ref("deepseek-v4-flash");
   const loading = ref(false);
   const streaming = ref(false);
   const firstTokenReceived = ref(false);
@@ -96,6 +97,10 @@ export const useAiChatStore = defineStore("ai-chat", () => {
 
   function closeDrawer() {
     drawerOpen.value = false;
+  }
+
+  function setSelectedModel(model) {
+    selectedModel.value = model === "deepseek-v4-pro" ? "deepseek-v4-pro" : "deepseek-v4-flash";
   }
 
   function stopGeneration() {
@@ -276,6 +281,7 @@ export const useAiChatStore = defineStore("ai-chat", () => {
 
   return {
     drawerOpen,
+    selectedModel,
     loading,
     streaming,
     firstTokenReceived,
@@ -292,6 +298,7 @@ export const useAiChatStore = defineStore("ai-chat", () => {
     latestActionCards,
     openDrawer,
     closeDrawer,
+    setSelectedModel,
     stopGeneration,
     startNewSession,
     sendMessage,
