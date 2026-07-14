@@ -182,6 +182,11 @@ class CryptoService:
         self._auto_scan_lock = asyncio.Lock()
         self._auto_loop_task: asyncio.Task | None = None
         self._auto_loop_consecutive_errors = 0
+        self._protective_loop_task: asyncio.Task | None = None
+        self._protective_interval_seconds = max(
+            0.1,
+            float(paper_config.get("tpsl_check_interval_seconds", 5) or 5),
+        )
         self._sync_ai_supervisor_status()
 
     async def get_quotes(
@@ -667,6 +672,7 @@ class CryptoService:
         }
 
     async def get_paper_account(self) -> CryptoPaperAccountResponse:
+        await self._refresh_paper_marks()
         account = self.paper_broker.get_account_info()
         return CryptoPaperAccountResponse(
             broker_name=str(account.get("broker_name", "CryptoPaperBroker")),
@@ -685,6 +691,7 @@ class CryptoService:
         )
 
     async def get_paper_positions(self) -> CryptoPaperPositionsResponse:
+        await self._refresh_paper_marks()
         positions = self.paper_broker.get_positions()
         items = [CryptoPaperPositionResponse(**position) for position in positions]
         return CryptoPaperPositionsResponse(
@@ -695,6 +702,7 @@ class CryptoService:
         )
 
     async def get_paper_equity_curve(self, limit: int = 200) -> CryptoPaperEquityCurveResponse:
+        await self._refresh_paper_marks(record_equity=True)
         points = [CryptoPaperEquityPointResponse(**item) for item in self.paper_broker.get_equity_curve(limit)]
         return CryptoPaperEquityCurveResponse(items=points, count=len(points))
 
@@ -702,7 +710,46 @@ class CryptoService:
         logs = [CryptoPaperLogResponse(**item) for item in self.paper_broker.get_paper_logs(limit)]
         return CryptoPaperLogsResponse(items=logs, count=len(logs))
 
+    async def _refresh_paper_marks(self, *, record_equity: bool = False, require_complete: bool = False) -> None:
+        symbols = [
+            symbol
+            for symbol, position in self.paper_broker.positions.items()
+            if float(position.get("quantity", 0) or 0) > 0
+        ]
+        if not symbols:
+            return
+
+        if not require_complete:
+            cached_rows = self.market_cache.get_quotes(symbols)
+            self.paper_broker.mark_to_market(
+                {str(row.get("symbol") or ""): row.get("price") for row in cached_rows},
+                record_equity=record_equity,
+            )
+            return
+
+        quotes = await self.get_quotes(symbols)
+        if str(getattr(quotes, "source", "")).startswith("cache"):
+            raise ApiError(
+                503,
+                "Current paper-position mark prices are unavailable; automatic trading is skipped for this cycle",
+                ErrorCode.INTERNAL_SERVER_ERROR,
+            )
+        mark_prices = {
+            normalize_crypto_symbol(item.symbol, self.paper_broker.quote_currency): float(item.price or 0)
+            for item in quotes.items
+            if float(item.price or 0) > 0
+        }
+        missing = [symbol for symbol in symbols if symbol not in mark_prices]
+        if require_complete and missing:
+            raise ApiError(
+                503,
+                f"Paper account mark prices unavailable for: {', '.join(missing)}",
+                ErrorCode.INTERNAL_SERVER_ERROR,
+            )
+        self.paper_broker.mark_to_market(mark_prices, record_equity=record_equity)
+
     async def get_auto_trading_status(self) -> AutoTradingStatusResponse:
+        self._ensure_protective_loop()
         return self._auto_status_response()
 
     async def update_auto_trading_config(self, request: AutoTradingConfigRequest) -> AutoTradingStatusResponse:
@@ -718,16 +765,19 @@ class CryptoService:
         status = self.auto_trading_engine.start()
         if status.get("state") == "running":
             self._ensure_auto_loop()
+        self._ensure_protective_loop()
         return self._auto_status_response()
 
     async def pause_auto_trading(self) -> AutoTradingStatusResponse:
         self.auto_trading_engine.pause()
         await self._stop_auto_loop()
+        self._ensure_protective_loop()
         return self._auto_status_response()
 
     async def stop_auto_trading(self) -> AutoTradingStatusResponse:
         self.auto_trading_engine.stop()
         await self._stop_auto_loop()
+        self._ensure_protective_loop()
         return self._auto_status_response()
 
     async def run_auto_trading_cycle(self) -> AutoTradingStatusResponse:
@@ -750,6 +800,7 @@ class CryptoService:
         try:
             if config.decision_mode == "ai_supervised" and place_orders:
                 await self._process_ai_protective_exits()
+            await self._refresh_paper_marks(record_equity=True, require_complete=True)
             run_request = CryptoStrategyRunRequest(
                 symbols=config.symbols,
                 period=config.period,
@@ -951,6 +1002,8 @@ class CryptoService:
                 take_profit_price=price * (1 + config.take_profit_pct) if decision["action"] == "BUY" else None,
             )
             self.auto_trading_engine.record_order_result(decision, order.to_response())
+            if decision["action"] == "BUY" and order.status in {"filled", "partial_filled"}:
+                self._ensure_protective_loop()
             if signal_id:
                 status = "ordered" if order.status in {"filled", "partial_filled", "pending"} else "rejected"
                 self.ai_store.update_approval(
@@ -993,6 +1046,8 @@ class CryptoService:
         if not protected_symbols:
             return
         quotes = await self.get_quotes(protected_symbols)
+        if str(getattr(quotes, "source", "")).lower().startswith("cache"):
+            raise RuntimeError("Fresh market quotes are unavailable; protective paper exits were deferred")
         mark_prices = {item.symbol: float(item.price or 0) for item in quotes.items}
         for order in self.paper_broker.process_protective_exits(mark_prices):
             decision = {
@@ -1009,6 +1064,55 @@ class CryptoService:
                 str(order.get("message") or "protected paper position closed"),
                 {"order_id": order.get("order_id"), "symbol": order.get("symbol"), "strategy": order.get("strategy")},
             )
+
+    def _has_protected_positions(self) -> bool:
+        return any(
+            bool(position.get("protection_enabled", False)) and float(position.get("quantity", 0) or 0) > 0
+            for position in self.paper_broker.positions.values()
+        )
+
+    def _ensure_protective_loop(self) -> None:
+        if not self._has_protected_positions():
+            return
+        if self._protective_loop_task is not None and not self._protective_loop_task.done():
+            return
+        self._protective_loop_task = asyncio.create_task(self._protective_risk_loop())
+
+    async def _stop_protective_loop(self) -> None:
+        task = self._protective_loop_task
+        self._protective_loop_task = None
+        if task is None or task.done():
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    async def _protective_risk_loop(self) -> None:
+        current_task = asyncio.current_task()
+        self.auto_trading_engine._log("INFO", "protective_loop_started", "paper position protection loop started")
+        try:
+            while self._has_protected_positions():
+                try:
+                    async with self._auto_scan_lock:
+                        await self._process_ai_protective_exits()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    self.auto_trading_engine._log(
+                        "WARNING",
+                        "protective_exit_failed",
+                        str(exc),
+                        {"type": exc.__class__.__name__},
+                    )
+                if not self._has_protected_positions():
+                    break
+                await asyncio.sleep(max(0.1, float(self._protective_interval_seconds or 5)))
+        finally:
+            if self._protective_loop_task is current_task:
+                self._protective_loop_task = None
+            self.auto_trading_engine._log("INFO", "protective_loop_stopped", "paper position protection loop stopped")
 
     def _ai_skipped_decision(
         self,
@@ -1099,6 +1203,15 @@ class CryptoService:
     def _auto_status_response(self) -> AutoTradingStatusResponse:
         self._sync_ai_supervisor_status()
         return AutoTradingStatusResponse(**self.auto_trading_engine.status())
+
+    def start_background_tasks(self) -> None:
+        """Restore safety monitors that must outlive the strategy loop."""
+        self._ensure_protective_loop()
+
+    async def shutdown_background_tasks(self) -> None:
+        """Cancel service-owned tasks during API shutdown."""
+        await self._stop_auto_loop()
+        await self._stop_protective_loop()
 
     def _ensure_auto_loop(self) -> None:
         if self._auto_loop_task is not None and not self._auto_loop_task.done():
@@ -1686,6 +1799,20 @@ class CryptoService:
 
     def record_quote_snapshots(self, rows: list[dict[str, Any]]) -> None:
         self.market_cache.upsert_quotes(rows)
+        open_symbols = {
+            symbol
+            for symbol, position in self.paper_broker.positions.items()
+            if float(position.get("quantity", 0) or 0) > 0
+        }
+        if open_symbols:
+            mark_prices = {}
+            for row in rows or []:
+                if str(row.get("market_type") or "spot") != "spot":
+                    continue
+                symbol = normalize_crypto_symbol(row.get("symbol"), self.paper_broker.quote_currency)
+                if symbol in open_symbols:
+                    mark_prices[symbol] = row.get("price")
+            self.paper_broker.mark_to_market(mark_prices, record_equity=False)
         market_rows: dict[str, list[dict[str, Any]]] = {}
         for row in rows or []:
             market_type = str(row.get("market_type") or "spot")

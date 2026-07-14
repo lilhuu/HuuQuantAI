@@ -11,6 +11,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from math import isfinite
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
@@ -178,6 +179,32 @@ class CryptoPaperBrokerExecutor:
         self._record_equity_point(order=order, reason="order_cancelled")
         self._persist_state()
         return True
+
+    def mark_to_market(self, mark_prices: Dict[str, Any], *, record_equity: bool = True) -> bool:
+        """Update open positions with current market prices."""
+        has_valid_mark = False
+        changed = False
+        for raw_symbol, raw_price in (mark_prices or {}).items():
+            symbol = normalize_crypto_symbol(raw_symbol, self.quote_currency)
+            position = self.positions.get(symbol)
+            if not position or float(position.get("quantity", 0) or 0) <= 0:
+                continue
+            try:
+                price = float(raw_price)
+            except (TypeError, ValueError):
+                continue
+            if not isfinite(price) or price <= 0:
+                continue
+            price = self._round_price(price)
+            has_valid_mark = True
+            if float(position.get("last_price", 0) or 0) != price:
+                position["last_price"] = price
+                changed = True
+
+        if has_valid_mark and record_equity:
+            self._record_equity_point(reason="mark_to_market")
+            self._persist_state()
+        return changed
 
     def get_account_info(self) -> Dict[str, Any]:
         market_value = self._market_value()
@@ -378,6 +405,7 @@ class CryptoPaperBrokerExecutor:
 
     def process_protective_exits(self, mark_prices: Dict[str, float]) -> List[Dict[str, Any]]:
         """Close protected paper positions when a local stop or target is crossed."""
+        self.mark_to_market(mark_prices)
         exits: List[Dict[str, Any]] = []
         for symbol, position in list(self.positions.items()):
             if not bool(position.get("protection_enabled", False)):

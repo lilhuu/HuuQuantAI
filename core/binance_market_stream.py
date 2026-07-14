@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
 
 from fastapi import WebSocket
+from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from core.binance_public_market_provider import normalize_instrument_symbol, normalize_market_type
 from core.crypto_market_data_provider import SUPPORTED_TIMEFRAMES, normalize_crypto_symbol
@@ -43,6 +44,28 @@ BINANCE_QUOTE_ASSETS = (
     "ZAR",
     "BIDR",
 )
+
+
+def _websocket_can_send(websocket: WebSocket) -> bool:
+    application_state = getattr(websocket, "application_state", None)
+    client_state = getattr(websocket, "client_state", None)
+    if application_state is not None and application_state is not WebSocketState.CONNECTED:
+        return False
+    return client_state is not WebSocketState.DISCONNECTED
+
+
+async def _send_json_if_connected(websocket: WebSocket, payload: dict[str, Any]) -> bool:
+    if not _websocket_can_send(websocket):
+        return False
+    try:
+        await websocket.send_json(payload)
+    except WebSocketDisconnect:
+        return False
+    except RuntimeError as exc:
+        if not _websocket_can_send(websocket) or "close message" in str(exc).lower():
+            return False
+        raise
+    return True
 
 
 def build_binance_stream_url(
@@ -225,22 +248,32 @@ async def send_initial_market_snapshots(
     try:
         quotes = await service.get_quotes(None, quote="ALL", limit=0, offset=0, market_type=market_type) if all_market else await service.get_quotes(symbols, market_type=market_type)
         for item in quotes.items:
-            await websocket.send_json({"type": "crypto_ticker", "item": item.model_dump()})
+            if not await _send_json_if_connected(
+                websocket,
+                {"type": "crypto_ticker", "item": item.model_dump()},
+            ):
+                return
     except Exception as exc:
-        await websocket.send_json(_error_message(f"REST 行情快照不可用: {exc}"))
+        if not await _send_json_if_connected(websocket, _error_message(f"REST 行情快照不可用: {exc}")):
+            return
 
     try:
         klines = await service.get_klines(selected_symbol, period=period, limit=200, market_type=market_type)
         for item in klines.items:
-            await websocket.send_json({"type": "crypto_kline", "item": item.model_dump()})
+            if not await _send_json_if_connected(
+                websocket,
+                {"type": "crypto_kline", "item": item.model_dump()},
+            ):
+                return
     except Exception as exc:
-        await websocket.send_json(_error_message(f"REST K 线快照不可用: {exc}"))
+        if not await _send_json_if_connected(websocket, _error_message(f"REST K 线快照不可用: {exc}")):
+            return
 
     try:
         depth = await service.get_orderbook(selected_symbol, limit=depth_limit, market_type=market_type)
-        await websocket.send_json({"type": "crypto_depth", "item": depth.model_dump()})
+        await _send_json_if_connected(websocket, {"type": "crypto_depth", "item": depth.model_dump()})
     except Exception as exc:
-        await websocket.send_json(_error_message(f"REST 盘口快照不可用: {exc}"))
+        await _send_json_if_connected(websocket, _error_message(f"REST 盘口快照不可用: {exc}"))
 
 
 async def stream_binance_market(
@@ -258,7 +291,7 @@ async def stream_binance_market(
     try:
         import websockets
     except ImportError as exc:
-        await websocket.send_json(_error_message(f"websockets 依赖未安装: {exc}"))
+        await _send_json_if_connected(websocket, _error_message(f"websockets 依赖未安装: {exc}"))
         return
 
     normalized_market_type = normalize_market_type(market_type)
@@ -273,25 +306,29 @@ async def stream_binance_market(
             normalized_symbols, period=period, depth_limit=depth_limit, selected_symbol=selected, all_market=all_market
             , market_type=normalized_market_type
         )
-        await websocket.send_json(
+        if not await _send_json_if_connected(
+            websocket,
             {
                 "type": "crypto_status",
                 "state": "connecting" if reconnect_attempt == 1 else "reconnecting",
                 "message": "正在连接 Binance 实时行情",
                 "timestamp": _now(),
-            }
-        )
+            },
+        ):
+            return
         try:
             async with websockets.connect(url, ping_interval=20, ping_timeout=20, close_timeout=5, proxy=proxy or True) as upstream:
                 reconnect_attempt = 0
-                await websocket.send_json(
+                if not await _send_json_if_connected(
+                    websocket,
                     {
                         "type": "crypto_status",
                         "state": "connected",
                         "message": "Binance 实时行情已连接",
                         "timestamp": _now(),
-                    }
-                )
+                    },
+                ):
+                    return
                 async for raw in upstream:
                     if use_mini_ticker:
                         batch = normalize_mini_ticker_message(raw, market_type=normalized_market_type)
@@ -300,7 +337,11 @@ async def stream_binance_market(
                             if now - last_mini_ticker_send >= MINI_TICKER_THROTTLE_SECONDS:
                                 last_mini_ticker_send = now
                                 for item in batch["items"]:
-                                    await websocket.send_json({"type": "crypto_ticker", "item": item})
+                                    if not await _send_json_if_connected(
+                                        websocket,
+                                        {"type": "crypto_ticker", "item": item},
+                                    ):
+                                        return
                                 try:
                                     service.record_quote_snapshots(batch["items"])
                                 except Exception:
@@ -313,18 +354,29 @@ async def stream_binance_market(
                         service.record_quote_snapshots([message["item"]])
                     elif message["type"] == "crypto_kline":
                         service.record_klines([message["item"]])
-                    await websocket.send_json(message)
+                    if not await _send_json_if_connected(websocket, message):
+                        return
+        except WebSocketDisconnect:
+            return
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
-            await websocket.send_json(_error_message(f"Binance 实时行情不可用: {exc}"))
+            if not await _send_json_if_connected(
+                websocket,
+                _error_message(f"Binance 实时行情不可用: {exc}"),
+            ):
+                return
             delay = min(30, 2 ** min(reconnect_attempt, 5))
-            await websocket.send_json(
+            if not await _send_json_if_connected(
+                websocket,
                 {
                     "type": "crypto_status",
                     "state": "reconnecting",
                     "message": f"{delay} 秒后重连 Binance 实时行情",
                     "timestamp": _now(),
-                }
-            )
+                },
+            ):
+                return
             await asyncio.sleep(delay)
 
 

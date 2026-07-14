@@ -41,7 +41,12 @@ openapi_tags = [
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    yield
+    service = get_crypto_service()
+    service.start_background_tasks()
+    try:
+        yield
+    finally:
+        await service.shutdown_background_tasks()
 
 
 app = FastAPI(

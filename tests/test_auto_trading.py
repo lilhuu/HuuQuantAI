@@ -1,5 +1,6 @@
 import asyncio
 
+import pytest
 from fastapi.testclient import TestClient
 
 from api.dependencies import get_current_user, get_crypto_service
@@ -119,6 +120,59 @@ def test_auto_trading_daily_loss_triggers_kill_switch_and_cooldown():
     assert decisions[0]["status"] == "skipped"
     assert decisions[0]["steps"][-1]["name"] == "risk_cooldown"
     assert decisions[0]["steps"][-1]["status"] == "fail"
+
+
+def test_auto_trading_cycle_marks_positions_before_daily_loss_check(tmp_path):
+    async def scenario():
+        service = CryptoService(
+            {
+                "crypto": {
+                    "exchange": "binance",
+                    "symbols": ["BTC/USDT"],
+                    "paper": {
+                        "initial_cash": 10000,
+                        "max_order_notional": 5000,
+                        "max_position_ratio": 1.0,
+                        "slippage_rate": 0,
+                        "partial_fill_enabled": False,
+                    },
+                },
+                "auto_trading": {
+                    "symbols": ["BTC/USDT"],
+                    "max_daily_loss": 100,
+                    "confidence_threshold": 0.1,
+                },
+                "storage": {"db_path": str(tmp_path / "marked_risk.db")},
+            }
+        )
+        buy = service.paper_broker.place_order("BTC/USDT", "BUY", 2, 100)
+        assert buy.status == "filled"
+        service.auto_trading_engine.start()
+        service.auto_trading_engine.build_order_decisions(
+            {"summary": []},
+            service.paper_broker.get_account_info(),
+            service.paper_broker.get_positions(),
+        )
+
+        async def fake_run_strategies(_request):
+            return _FakeStrategyResult()
+
+        async def fake_get_quotes(_symbols, **_kwargs):
+            quote = type("Quote", (), {"symbol": "BTC/USDT", "price": 25.0})()
+            return type("Quotes", (), {"items": [quote]})()
+
+        service.run_strategies = fake_run_strategies
+        service.get_quotes = fake_get_quotes
+
+        status = await service.run_auto_trading_cycle()
+
+        assert status.state == "paused"
+        assert status.risk_state["kill_switch_active"] is True
+        assert status.risk_state["daily_pnl"] == pytest.approx(-150)
+        assert service.paper_broker.get_account_info()["equity"] == pytest.approx(9849.8)
+        assert service.paper_broker.get_positions()[0]["current_price"] == 25
+
+    asyncio.run(scenario())
 
 
 def test_auto_trading_consecutive_losses_trigger_kill_switch():

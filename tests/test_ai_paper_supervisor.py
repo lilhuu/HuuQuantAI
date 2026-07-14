@@ -1,6 +1,8 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from api.models.request import AutoTradingConfigRequest
 from api.models.response import (
     CryptoKLineResponse,
@@ -210,6 +212,137 @@ def test_ai_supervised_cycle_processes_protective_exit_between_candles(tmp_path)
 
     assert service.paper_broker.get_positions() == []
     assert any(order.strategy == "protective_stop_loss" for order in service.paper_broker.orders.values())
+
+
+@pytest.mark.parametrize(
+    ("control_method", "expected_state"),
+    [("pause_auto_trading", "paused"), ("stop_auto_trading", "stopped")],
+)
+def test_protective_exit_loop_survives_auto_trading_pause_and_stop(tmp_path, control_method, expected_state):
+    async def scenario():
+        service = _service(tmp_path / expected_state)
+        service._protective_interval_seconds = 0.01
+        order = service.paper_broker.place_order(
+            "BTC/USDT",
+            "BUY",
+            0.006,
+            50_000,
+            strategy="ai-supervised:test",
+            stop_loss_price=49_000,
+            take_profit_price=52_000,
+        )
+        assert order.status == "filled"
+        service.get_quotes = AsyncMock(
+            return_value=CryptoQuotesResponse(
+                items=[CryptoQuoteResponse(symbol="BTC/USDT", price=48_000, source="unit")],
+                count=1,
+                source="unit",
+            )
+        )
+        service.auto_trading_engine.start()
+
+        status = await getattr(service, control_method)()
+
+        assert status.state == expected_state
+        assert service._auto_loop_task is None
+        for _ in range(50):
+            if not service.paper_broker.get_positions():
+                break
+            await asyncio.sleep(0.01)
+        assert service.paper_broker.get_positions() == []
+        assert any(order.strategy == "protective_stop_loss" for order in service.paper_broker.orders.values())
+
+    asyncio.run(scenario())
+
+
+def test_protective_exit_loop_restores_with_background_tasks(tmp_path):
+    original = _service(tmp_path)
+    order = original.paper_broker.place_order(
+        "BTC/USDT",
+        "BUY",
+        0.006,
+        50_000,
+        strategy="ai-supervised:test",
+        stop_loss_price=49_000,
+        take_profit_price=52_000,
+    )
+    assert order.status == "filled"
+
+    async def scenario():
+        restarted = _service(tmp_path)
+        restarted._protective_interval_seconds = 0.01
+        restarted.get_quotes = AsyncMock(
+            return_value=CryptoQuotesResponse(
+                items=[CryptoQuoteResponse(symbol="BTC/USDT", price=48_000, source="unit")],
+                count=1,
+                source="unit",
+            )
+        )
+
+        restarted.start_background_tasks()
+        for _ in range(50):
+            if not restarted.paper_broker.get_positions():
+                break
+            await asyncio.sleep(0.01)
+        await restarted.shutdown_background_tasks()
+
+        assert restarted.paper_broker.get_positions() == []
+        assert restarted._protective_loop_task is None
+        assert any(
+            item.strategy == "protective_stop_loss"
+            for item in restarted.paper_broker.orders.values()
+        )
+
+    asyncio.run(scenario())
+
+
+def test_protective_exit_loop_waits_for_live_quotes(tmp_path):
+    async def scenario():
+        service = _service(tmp_path)
+        service._protective_interval_seconds = 0.01
+        order = service.paper_broker.place_order(
+            "BTC/USDT",
+            "BUY",
+            0.006,
+            50_000,
+            strategy="ai-supervised:test",
+            stop_loss_price=49_000,
+            take_profit_price=52_000,
+        )
+        assert order.status == "filled"
+
+        quote_calls = 0
+        position_present_before_live = False
+
+        async def get_quotes(*_args, **_kwargs):
+            nonlocal quote_calls, position_present_before_live
+            quote_calls += 1
+            if quote_calls == 1:
+                return CryptoQuotesResponse(
+                    items=[CryptoQuoteResponse(symbol="BTC/USDT", price=48_000, source="cache")],
+                    count=1,
+                    source="cache_binance",
+                )
+            position_present_before_live = bool(service.paper_broker.get_positions())
+            return CryptoQuotesResponse(
+                items=[CryptoQuoteResponse(symbol="BTC/USDT", price=48_000, source="unit")],
+                count=1,
+                source="unit",
+            )
+
+        service.get_quotes = AsyncMock(side_effect=get_quotes)
+        service.start_background_tasks()
+        for _ in range(50):
+            if not service.paper_broker.get_positions():
+                break
+            await asyncio.sleep(0.01)
+        await service.shutdown_background_tasks()
+
+        assert quote_calls >= 2
+        assert position_present_before_live is True
+        assert service.paper_broker.get_positions() == []
+
+    asyncio.run(scenario())
 
 
 def test_ai_supervised_hold_and_low_confidence_never_place_orders(tmp_path):

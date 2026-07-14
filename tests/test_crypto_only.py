@@ -1,5 +1,9 @@
-from fastapi.testclient import TestClient
+import asyncio
 import sqlite3
+
+import pytest
+from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 import api.dependencies as dependencies
 from api.dependencies import get_auth_service, get_current_user, get_crypto_service
@@ -7,7 +11,13 @@ from api.main import app
 from api.routers import crypto_ws
 from api.services.auth_service import AuthService
 from api.services.crypto_service import CryptoService
-from core.binance_market_stream import build_binance_stream_url, normalize_binance_stream_message, normalize_mini_ticker_message
+from core.binance_market_stream import (
+    build_binance_stream_url,
+    normalize_binance_stream_message,
+    normalize_mini_ticker_message,
+    send_initial_market_snapshots,
+    stream_binance_market,
+)
 from core.binance_testnet_executor import BinanceTestnetExecutor
 from core.crypto_backtest_engine import CryptoBacktestEngine
 from core.crypto_market_data_provider import CryptoMarketDataProvider
@@ -40,6 +50,31 @@ def test_crypto_paper_broker_buy_sell_and_rejects():
     too_large = broker.place_order("ETH/USDT", "BUY", 10, 1000)
     assert too_large.status == "rejected"
     assert "single order notional" in too_large.message
+
+
+def test_crypto_paper_broker_marks_open_positions_to_market():
+    broker = CryptoPaperBrokerExecutor(
+        {
+            "initial_cash": 10000,
+            "max_order_notional": 5000,
+            "max_position_ratio": 1.0,
+            "slippage_rate": 0,
+            "partial_fill_enabled": False,
+        }
+    )
+    order = broker.place_order("BTC/USDT", "BUY", 1, 100)
+    assert order.status == "filled"
+
+    broker.mark_to_market({"BTC/USDT": 80})
+
+    account = broker.get_account_info()
+    position = broker.get_positions()[0]
+    assert position["current_price"] == 80
+    assert position["unrealized_pnl"] == -20
+    assert account["market_value"] == 80
+    assert account["equity"] == pytest.approx(9979.9)
+    assert broker.get_equity_curve(1)[0]["reason"] == "mark_to_market"
+    assert broker.get_equity_curve(1)[0]["equity"] == pytest.approx(9979.9)
 
 
 def test_crypto_paper_broker_partial_fill_cancel_and_real_switch_refusal():
@@ -646,6 +681,113 @@ def test_binance_stream_all_market_uses_official_mini_ticker_and_compact_symbols
     assert batch["type"] == "crypto_ticker_batch"
     assert batch["items"][0]["symbol"] == "ETH/BTC"
     assert batch["items"][0]["amount"] == 5.0
+
+
+def test_binance_stream_stops_when_frontend_websocket_disconnects():
+    class DisconnectingWebSocket:
+        application_state = WebSocketState.CONNECTED
+        client_state = WebSocketState.CONNECTED
+
+        def __init__(self):
+            self.send_attempts = 0
+
+        async def send_json(self, _payload):
+            self.send_attempts += 1
+            self.application_state = WebSocketState.DISCONNECTED
+            raise WebSocketDisconnect(code=1000)
+
+    websocket = DisconnectingWebSocket()
+
+    asyncio.run(stream_binance_market(websocket, object(), ["BTC/USDT"]))
+
+    assert websocket.send_attempts == 1
+
+
+def test_binance_snapshot_stops_when_frontend_websocket_disconnects():
+    class Item:
+        def model_dump(self):
+            return {"symbol": "BTC/USDT", "price": 50_000}
+
+    class Response:
+        items = [Item()]
+
+    class Service:
+        def __init__(self):
+            self.kline_calls = 0
+
+        async def get_quotes(self, *_args, **_kwargs):
+            return Response()
+
+        async def get_klines(self, *_args, **_kwargs):
+            self.kline_calls += 1
+            return Response()
+
+        async def get_orderbook(self, *_args, **_kwargs):
+            return Item()
+
+    class DisconnectingWebSocket:
+        application_state = WebSocketState.CONNECTED
+        client_state = WebSocketState.CONNECTED
+
+        def __init__(self):
+            self.send_attempts = 0
+
+        async def send_json(self, _payload):
+            self.send_attempts += 1
+            self.application_state = WebSocketState.DISCONNECTED
+            raise WebSocketDisconnect(code=1000)
+
+    service = Service()
+    websocket = DisconnectingWebSocket()
+
+    asyncio.run(
+        send_initial_market_snapshots(
+            websocket,
+            service,
+            ["BTC/USDT"],
+            "1h",
+            "BTC/USDT",
+            20,
+        )
+    )
+
+    assert websocket.send_attempts == 1
+    assert service.kline_calls == 0
+
+
+def test_binance_stream_does_not_send_reconnect_notice_after_close(monkeypatch):
+    import websockets
+
+    class FailingConnection:
+        async def __aenter__(self):
+            raise OSError("upstream unavailable")
+
+        async def __aexit__(self, *_args):
+            return False
+
+    class ClosingWebSocket:
+        application_state = WebSocketState.CONNECTED
+        client_state = WebSocketState.CONNECTED
+
+        def __init__(self):
+            self.messages = []
+            self.send_attempts = 0
+
+        async def send_json(self, payload):
+            self.send_attempts += 1
+            if self.application_state is WebSocketState.DISCONNECTED:
+                raise RuntimeError('Cannot call "send" once a close message has been sent.')
+            self.messages.append(payload)
+            if len(self.messages) == 2:
+                self.application_state = WebSocketState.DISCONNECTED
+
+    monkeypatch.setattr(websockets, "connect", lambda *_args, **_kwargs: FailingConnection())
+    websocket = ClosingWebSocket()
+
+    asyncio.run(stream_binance_market(websocket, object(), ["BTC/USDT"]))
+
+    assert websocket.send_attempts == 2
+    assert len(websocket.messages) == 2
 
 
 def test_crypto_websocket_auth_and_status(monkeypatch, tmp_path):
